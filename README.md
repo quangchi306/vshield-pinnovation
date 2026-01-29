@@ -1,32 +1,32 @@
 # 🛡️ V-Shield Home - P-Innovation 2026
 
-**V-Shield Home** là ứng dụng bảo mật di động được thiết kế để bảo vệ người dùng khỏi các mối đe dọa trực tuyến. Dự án này được phát triển như một phần của cuộc thi **P-Innovation 2026** bởi nhóm sinh viên chuyên ngành **An toàn thông tin**.
+**V-Shield Home** is a mobile security application designed to protect users from modern cyber threats. Developed as part of the **P-Innovation 2026** competition, this project is built by a team of Information Security students.
 
 ---
 
-## 🌟 Tổng quan dự án
-Ứng dụng hoạt động dựa trên cơ chế **Local VPN** để giám sát và lọc lưu lượng truy cập ngay trên thiết bị. Mục tiêu chính là ngăn chặn việc kết nối tới các tên miền (domain) chứa mã độc, lừa đảo mà không cần gửi dữ liệu ra máy chủ bên ngoài, giúp đảm bảo quyền riêng tư tuyệt đối cho người dùng.
+## 🌟 Project Overview
+The application utilizes a **Local VPN** mechanism to monitor and filter network traffic directly on the device. Its primary objective is to block connections to malicious, phishing, and malware-hosting domains without routing data through external servers, ensuring absolute user privacy.
 
-## ✨ Tính năng nổi bật
-- **Chặn tên miền độc hại:** Tự động phát hiện và ngăn chặn truy cập các domain nằm trong danh sách đen (blocklist).
-- **Cơ chế Local VPN:** Sử dụng `VpnService` của Android để xử lý gói tin tại chỗ, không gây trễ mạng.
-- **Quản lý danh sách tùy chỉnh:** Người dùng có thể cập nhật hoặc thêm các nguồn blocklist khác nhau.
-- **Tiết kiệm tài nguyên:** Tối ưu hóa để chạy ngầm ổn định trên các thiết bị Android mà không gây hao pin.
+## ✨ Key Features
+- **Malicious Domain Blocking:** Automatically detects and prevents access to domains listed in global blocklists.
+- **Local VPN Engine:** Leverages Android's `VpnService` to process packets locally with zero network latency.
+- **Customizable Blocklists:** Allows users to update or integrate multiple blocklist sources.
+- **Resource Optimization:** Optimized for stable background operation on Android devices without significant battery drain.
 
-## 💻 Công nghệ sử dụng
-- **Ngôn ngữ lập trình:** Java (Android SDK).
-- **Môi trường phát triển:** Android Studio.
-- **Hệ thống quản lý:** Git & GitHub.
-- **Kiến trúc:** Local VPN Service.
+## 💻 Technical Stack
+- **Language:** Java (Android SDK).
+- **IDE:** Android Studio.
+- **Version Control:** Git & GitHub.
+- **Core Architecture:** Local VPN Service (VpnService API).
 
-## 📂 Cấu trúc thư mục chính
-- `app/src/main/java/`: Mã nguồn xử lý logic VPN và quản trị hệ thống.
-- `app/src/main/assets/`: Chứa file `blocklist_sample.txt` định nghĩa các domain cần chặn.
-- `app/src/main/res/`: Tài nguyên về giao diện và hình ảnh của ứng dụng.
+## 📂 Project Structure
+- `app/src/main/java/`: Core source code for VPN logic and system administration.
+- `app/src/main/assets/`: Contains `blocklist_sample.txt` defining the blocked domains.
+- `app/src/main/res/`: User interface assets and application resources.
 
-## 🚀 Hướng dẫn cài đặt
-Để chạy dự án trên máy tính cá nhân (ví dụ: ThinkBook 16 G7+), hãy thực hiện các bước sau:
+## 🚀 Installation & Setup
+To run this project on your local machine (e.g., ThinkBook 16 G7+), follow these steps:
 
-1. **Clone project:**
+1. **Clone the project:**
    ```bash
    git clone [https://github.com/quangchi306/vshield-pinnovation.git](https://github.com/quangchi306/vshield-pinnovation.git)
