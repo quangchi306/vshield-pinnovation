@@ -25,7 +25,7 @@ The application utilizes a **Local VPN** mechanism to monitor and filter network
 - `app/src/main/res/`: User interface assets and application resources.
 
 ## 🚀 Installation & Setup
-To run this project on your local machine (e.g., ThinkBook 16 G7+), follow these steps:
+To run this project on your local machine, follow these steps:
 
 1. **Clone the project:**
    ```bash
