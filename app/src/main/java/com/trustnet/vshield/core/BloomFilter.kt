@@ -4,11 +4,6 @@ import java.util.BitSet
 import kotlin.math.ln
 import kotlin.math.roundToInt
 
-/**
- * Bloom Filter demo (đủ dùng cho MVP).
- * - Tối ưu check "có thể có" (mightContain) O(k)
- * - False positive có thể xảy ra, nên vẫn nên confirm bằng HashSet nếu cần.
- */
 class BloomFilter private constructor(
     private val bitSize: Int,
     private val numHashFunctions: Int
@@ -37,10 +32,6 @@ class BloomFilter private constructor(
         return if (r < 0) r + m else r
     }
 
-    /**
-     * Double-hashing: tạo (h1, h2) rồi suy ra k hash.
-     * Hash này không cần “cryptographic”, chỉ cần phân tán tạm ổn.
-     */
     private fun hashPair(s: String): Pair<Int, Int> {
         val b = s.toByteArray(Charsets.UTF_8)
         val h1 = murmur3_32(b, seed = 0x9747b28c.toInt())
@@ -78,7 +69,7 @@ class BloomFilter private constructor(
         fun empty(): BloomFilter = BloomFilter(64, 1)
 
         /**
-         * MurmurHash3 x86 32-bit (phiên bản rút gọn, đủ dùng cho bloom).
+         * MurmurHash3 x86 32-bit
          */
         private fun murmur3_32(data: ByteArray, seed: Int): Int {
             var h1 = seed

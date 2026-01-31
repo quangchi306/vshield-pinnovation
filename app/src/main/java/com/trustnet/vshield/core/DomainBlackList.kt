@@ -43,7 +43,7 @@ object DomainBlacklist {
                 seq.mapNotNull { normalizeDomain(it) }.toSet()
             }
         } else {
-            appContext.assets.open("blocklist_sample.txt").bufferedReader().useLines { seq ->
+            appContext.assets.open("blacklist.txt").bufferedReader().useLines { seq ->
                 seq.mapNotNull { normalizeDomain(it) }.toSet()
             }
         }
