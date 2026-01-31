@@ -20,7 +20,6 @@ import com.trustnet.vshield.ui.screen.HomeScreen
 import com.trustnet.vshield.ui.screen.SettingsScreen
 import com.trustnet.vshield.ui.theme.VshieldTheme
 
-// Enum để định nghĩa các màn hình trong App
 enum class AppScreen { HOME, SETTINGS }
 
 class MainActivity : ComponentActivity() {
@@ -35,7 +34,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-    // 2. Launcher xử lý xin quyền thông báo (Android 13+)
+    // 2. Launcher xử lý xin quyền thông báo
     private val notifPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
             if (!isGranted) toast("Thông báo bị tắt. Bạn sẽ không thấy trạng thái VPN trên thanh status.")
@@ -57,10 +56,10 @@ class MainActivity : ComponentActivity() {
             VshieldTheme {
                 // --- QUẢN LÝ TRẠNG THÁI GIAO DIỆN ---
 
-                // Biến lưu màn hình hiện tại (Mặc định là HOME)
+                // Biến lưu màn hình hiện tại
                 var currentScreen by remember { mutableStateOf(AppScreen.HOME) }
 
-                // Lắng nghe dữ liệu từ Service (VPN đang chạy hay tắt?)
+                // Lắng nghe dữ liệu từ Service
                 val isRunning by VpnStats.isRunning.observeAsState(initial = false)
 
                 // Lắng nghe số lượng quảng cáo đã chặn
@@ -68,7 +67,7 @@ class MainActivity : ComponentActivity() {
 
                 // Xử lý nút Back cứng trên điện thoại:
                 // Nếu đang ở Settings -> Quay về Home.
-                // Nếu đang ở Home -> Thoát app (mặc định).
+                // Nếu đang ở Home -> Thoát app
                 BackHandler(enabled = currentScreen == AppScreen.SETTINGS) {
                     currentScreen = AppScreen.HOME
                 }
@@ -105,13 +104,13 @@ class MainActivity : ComponentActivity() {
     // --- CÁC HÀM LOGIC XỬ LÝ VPN ---
 
     private fun requestVpnPermissionAndStart() {
-        // Kiểm tra xem hệ thống đã cấp quyền VPN chưa
+        // Kiểm tra xem hệ thống đã cấp quyền VPN?
         val intent = VpnService.prepare(this)
         if (intent != null) {
-            // Nếu chưa, hiện hộp thoại hỏi người dùng
+            //Hộp thoại hỏi người dùng
             vpnPermissionLauncher.launch(intent)
         } else {
-            // Nếu rồi, chạy luôn
+            // Chạy
             startVpn()
         }
     }
@@ -133,7 +132,6 @@ class MainActivity : ComponentActivity() {
 
     private fun updateBlacklist() {
         toast("Đang tải dữ liệu chặn mới nhất...")
-        // Giả lập delay cập nhật hoặc gọi hàm update thật
         DomainBlacklist.updateFromUrl(DomainBlacklist.DEFAULT_REMOTE_URL) { success, msg ->
             runOnUiThread {
                 if (success) {

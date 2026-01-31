@@ -29,7 +29,7 @@ class VShieldVpnService : VpnService() {
     }
 
     override fun onRevoke() {
-        // Hệ thống gọi khi người dùng “disconnect/forget” trong Settings VPN.
+        // Hệ thống gọi khi người dùng disconnect/forget trong Settings VPN.
         stopVpn()
         super.onRevoke()
     }
@@ -47,10 +47,9 @@ class VShieldVpnService : VpnService() {
             .setSession("V-Shield Home")
             .setMtu(MTU)
             .addAddress(VPN_CLIENT_IP, 32)
-            .addRoute(VPN_DNS_IP, 32) // Chỉ bắt gói tin đến DNS ảo 10.10.0.1
+            .addRoute(VPN_DNS_IP, 32)
             .addDnsServer(VPN_DNS_IP)
             .setBlocking(true)
-        // setBlocking(true) quan trọng để FileInputStream không bị đóng sớm
 
         vpnInterface = builder.establish()
         if (vpnInterface == null) {

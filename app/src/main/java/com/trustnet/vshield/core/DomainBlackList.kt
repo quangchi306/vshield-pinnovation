@@ -1,4 +1,4 @@
-package com.trustnet.vshield.core
+    package com.trustnet.vshield.core
 
 import android.content.Context
 import android.util.Log
@@ -18,9 +18,6 @@ object DomainBlacklist {
     private const val TAG = "DomainBlacklist"
     private const val STORED_FILE = "blacklist_domains.txt"
 
-    // Bạn có thể đổi nguồn:
-    // - urls.txt của ChongLuaDao-Phishing-Blocklist là danh sách URL phishing (ta sẽ trích host).
-    // Repo mô tả đây là blocklist .txt từ Chống Lừa Đảo và cập nhật daily.
     const val DEFAULT_REMOTE_URL =
         "https://raw.githubusercontent.com/elliotwutingfeng/ChongLuaDao-Phishing-Blocklist/main/urls.txt"
 
@@ -93,7 +90,7 @@ object DomainBlacklist {
                         .toSet()
                 }
 
-                // Persist domain-only list (để lần sau load nhanh, không cần parse URL nữa)
+                // Persist domain-only list
                 val file = File(appContext.filesDir, STORED_FILE)
                 file.bufferedWriter().use { out ->
                     domains.forEach { out.appendLine(it) }
@@ -113,13 +110,6 @@ object DomainBlacklist {
         snapshotRef.set(Snapshot(domains, bloom))
     }
 
-    /**
-     * Input line có thể là:
-     * - domain (example.com)
-     * - host file (0.0.0.0 example.com)
-     * - uBlock style (||example.com^)
-     * - full URL (https://abc.com/path?...), ta sẽ trích host
-     */
     private fun extractDomainFromLine(line: String): String? {
         var s = line.trim()
         if (s.isEmpty()) return null
@@ -144,7 +134,6 @@ object DomainBlacklist {
             }
         }
 
-        // URL thiếu scheme nhưng có path
         if (s.contains("/")) {
             return try {
                 URI("http://$s").host
@@ -175,8 +164,8 @@ object DomainBlacklist {
         if (s.any { it.isWhitespace() }) return null
         return s
     }
-    const val FILTER_SIZE_M = 2_000_000 // Ví dụ: kích thước mảng bit (bitSize)
-    const val FILTER_HASH_K = 5         // Ví dụ: số hàm băm (numHashFunctions)
+    const val FILTER_SIZE_M = 2_000_000
+    const val FILTER_HASH_K = 5
 
     // URL tải file BIN
     const val BINARY_REMOTE_URL = "https://your-server.com/api/v1/blacklist.bin"
@@ -202,7 +191,7 @@ object DomainBlacklist {
                 // Load vào bộ nhớ
                 val newBloom = BloomFilter.loadFromByteArray(bytes, FILTER_HASH_K, FILTER_SIZE_M)
 
-                // Cập nhật snapshot (Lưu ý: set domains là rỗng vì ta không còn giữ text gốc nữa để tiết kiệm RAM)
+                // Cập nhật snapshot
                 snapshotRef.set(Snapshot(emptySet(), newBloom))
 
                 callback(true, "Đã cập nhật dữ liệu vệ tinh (Binary size: ${bytes.size} bytes)")

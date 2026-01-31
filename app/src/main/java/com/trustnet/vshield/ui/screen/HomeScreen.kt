@@ -200,7 +200,6 @@ fun StatsDashboard(isConnected: Boolean, blockedCount: String) {
             StatItem(
                 icon = Icons.Filled.Shield,
                 label = "Blocked",
-                // Nếu chưa kết nối và số chặn = 0 thì hiện gạch ngang cho đẹp
                 value = if (blockedCount == "0" && !isConnected) "--" else blockedCount,
                 color = MaterialTheme.colorScheme.primary
             )
@@ -227,6 +226,5 @@ fun StatItem(icon: ImageVector, label: String, value: String, color: Color) {
 @Preview(showBackground = true)
 @Composable
 fun HomeScreenPreview() {
-    // Xem trước giao diện mà không cần chạy máy ảo
     HomeScreen(isConnected = true, blockedCount = "1024", {}, {})
 }
