@@ -58,7 +58,6 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = currentScreen == AppScreen.SETTINGS) {
                     currentScreen = AppScreen.HOME
                 }
-                -
                 when (currentScreen) {
                     AppScreen.HOME -> {
                         HomeScreen(
