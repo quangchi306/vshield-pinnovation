@@ -62,7 +62,7 @@ We address the limitation of static blacklists (which are often slow to update) 
 
 ## 🤝 Contributors
 
-**Team V-Shield - PTIT HCM**
+**Team TrustNet - PTIT HCM**
 
 ## 📄 License
 
