@@ -53,7 +53,7 @@ We address the limitation of static blacklists (which are often slow to update) 
 ### Installation
 1.  Clone the repository:
     ```bash
-    git clone [https://github.com/quangchi306/vshield-pinnovation.git](https://github.com/quangchi306/vshield-pinnovation.git)
+    git clone https://github.com/quangchi306/vshield-pinnovation.git
     ```
 2.  Open the project in Android Studio.
 3.  Sync Gradle dependencies.
