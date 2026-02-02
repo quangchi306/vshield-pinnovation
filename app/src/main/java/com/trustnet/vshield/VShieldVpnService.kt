@@ -29,7 +29,6 @@ class VShieldVpnService : VpnService() {
     }
 
     override fun onRevoke() {
-        // Hệ thống gọi khi người dùng disconnect/forget trong Settings VPN.
         stopVpn()
         super.onRevoke()
     }
@@ -42,7 +41,6 @@ class VShieldVpnService : VpnService() {
         VpnStats.isRunning.postValue(true)
         startInForeground()
 
-        // Setup VPN interface như cũ
         val builder = Builder()
             .setSession("V-Shield Home")
             .setMtu(MTU)
@@ -58,7 +56,6 @@ class VShieldVpnService : VpnService() {
             return
         }
 
-        // KHỞI TẠO VÀ CHẠY WORKER MỚI
         worker = DnsVpnWorker(this, vpnInterface!!)
         worker?.start()
     }
@@ -104,7 +101,6 @@ class VShieldVpnService : VpnService() {
             .setOngoing(true)
             .build()
 
-        // Android 14+ cần foreground service type; specialUse theo docs
         if (Build.VERSION.SDK_INT >= 34) {
             ServiceCompat.startForeground(
                 this,

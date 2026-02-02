@@ -24,7 +24,6 @@ enum class AppScreen { HOME, SETTINGS }
 
 class MainActivity : ComponentActivity() {
 
-    // 1. Launcher xử lý kết quả khi xin quyền VPN
     private val vpnPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
@@ -34,7 +33,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-    // 2. Launcher xử lý xin quyền thông báo
     private val notifPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
             if (!isGranted) toast("Thông báo bị tắt. Bạn sẽ không thấy trạng thái VPN trên thanh status.")
@@ -43,7 +41,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Kiểm tra và xin quyền thông báo nếu chạy trên Android 13 (Tiramisu) trở lên
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED
@@ -54,25 +51,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VshieldTheme {
-                // --- QUẢN LÝ TRẠNG THÁI GIAO DIỆN ---
-
-                // Biến lưu màn hình hiện tại
                 var currentScreen by remember { mutableStateOf(AppScreen.HOME) }
-
-                // Lắng nghe dữ liệu từ Service
                 val isRunning by VpnStats.isRunning.observeAsState(initial = false)
-
-                // Lắng nghe số lượng quảng cáo đã chặn
                 val blockedCount by VpnStats.blockedCount.observeAsState(initial = 0L)
 
-                // Xử lý nút Back cứng trên điện thoại:
-                // Nếu đang ở Settings -> Quay về Home.
-                // Nếu đang ở Home -> Thoát app
                 BackHandler(enabled = currentScreen == AppScreen.SETTINGS) {
                     currentScreen = AppScreen.HOME
                 }
-
-                // --- ĐIỀU HƯỚNG MÀN HÌNH ---
+                -
                 when (currentScreen) {
                     AppScreen.HOME -> {
                         HomeScreen(
@@ -101,16 +87,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // --- CÁC HÀM LOGIC XỬ LÝ VPN ---
 
     private fun requestVpnPermissionAndStart() {
-        // Kiểm tra xem hệ thống đã cấp quyền VPN?
         val intent = VpnService.prepare(this)
         if (intent != null) {
-            //Hộp thoại hỏi người dùng
             vpnPermissionLauncher.launch(intent)
         } else {
-            // Chạy
             startVpn()
         }
     }
@@ -119,7 +101,6 @@ class MainActivity : ComponentActivity() {
         val i = Intent(this, VShieldVpnService::class.java).apply {
             action = VShieldVpnService.ACTION_START
         }
-        // Dùng startForegroundService vì VPN cần chạy ngầm bền vững
         ContextCompat.startForegroundService(this, i)
     }
 

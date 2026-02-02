@@ -36,7 +36,6 @@ class BloomFilter private constructor(
         val b = s.toByteArray(Charsets.UTF_8)
         val h1 = murmur3_32(b, seed = 0x9747b28c.toInt())
         val h2 = murmur3_32(b, seed = 0x1b873593)
-        // tránh h2 = 0 làm hash k lần bị trùng
         return h1 to (if (h2 == 0) 0x5bd1e995 else h2)
     }
 
@@ -44,23 +43,17 @@ class BloomFilter private constructor(
         fun create(expectedInsertions: Int, falsePositiveRate: Double = 1e-3): BloomFilter {
             val n = expectedInsertions.coerceAtLeast(1)
             val p = falsePositiveRate.coerceIn(1e-9, 0.5)
-
-            // m = -(n ln p) / (ln 2)^2
             val m = (-(n * ln(p)) / (ln(2.0) * ln(2.0))).roundToInt().coerceAtLeast(64)
-            // k = (m/n) ln 2
             val k = ((m.toDouble() / n) * ln(2.0)).roundToInt().coerceIn(1, 10)
 
             return BloomFilter(m, k)
         }
 
         fun loadFromByteArray(data: ByteArray, numHashes: Int, expectedSize: Int): BloomFilter {
-            // expectedSize: kích thước mảng bit (m) - Server và Client phải thống nhất con số này
             val filter = BloomFilter(expectedSize, numHashes)
-            filter.bits.clear() // Xóa sạch cũ
-
-            // Convert byte[] -> BitSet
+            filter.bits.clear()
             val loadedBits = BitSet.valueOf(data)
-            filter.bits.or(loadedBits) // Merge vào
+            filter.bits.or(loadedBits)
 
             return filter
         }
@@ -68,9 +61,7 @@ class BloomFilter private constructor(
 
         fun empty(): BloomFilter = BloomFilter(64, 1)
 
-        /**
-         * MurmurHash3 x86 32-bit
-         */
+        // MurmurHash3 x86 32-bit
         private fun murmur3_32(data: ByteArray, seed: Int): Int {
             var h1 = seed
             val c1 = 0xcc9e2d51.toInt()

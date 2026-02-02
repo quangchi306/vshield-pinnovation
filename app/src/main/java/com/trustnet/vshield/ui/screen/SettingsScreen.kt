@@ -48,7 +48,6 @@ fun SettingsScreen(
                 .padding(padding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Section 1: Cấu hình mạng
             item { SectionHeader("NETWORK CONFIGURATION") }
 
             item {
