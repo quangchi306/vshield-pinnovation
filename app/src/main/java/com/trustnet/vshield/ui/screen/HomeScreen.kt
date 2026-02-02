@@ -29,21 +29,18 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// Hàm chính của màn hình, nhận dữ liệu từ MainActivity truyền vào
 @Composable
 fun HomeScreen(
-    isConnected: Boolean,           // Trạng thái VPN (Bật/Tắt)
-    blockedCount: String,           // Số lượng đã chặn
-    onToggleClick: () -> Unit,      // Hàm xử lý khi bấm nút to
-    onSettingsClick: () -> Unit     // Hàm xử lý khi bấm nút cài đặt
+    isConnected: Boolean,
+    blockedCount: String,
+    onToggleClick: () -> Unit,
+    onSettingsClick: () -> Unit
 ) {
-    // Animation chuyển màu nền khi Bật/Tắt
     val backgroundColor by animateColorAsState(
         targetValue = if (isConnected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
         animationSpec = tween(500), label = "bgColor"
     )
 
-    // Animation chuyển màu nút bấm
     val buttonColor by animateColorAsState(
         targetValue = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
         animationSpec = tween(500), label = "btnColor"
@@ -69,7 +66,6 @@ fun HomeScreen(
             verticalArrangement = Arrangement.SpaceBetween
         ) {
 
-            // Phần 1: Nút bấm trung tâm (Power Button)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.weight(1f)
@@ -87,7 +83,6 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // Phần 3: Bảng thống kê (Blocked / Status)
             StatsDashboard(isConnected, blockedCount)
         }
     }
@@ -132,7 +127,6 @@ fun ConnectButton(
     iconColor: Color,
     onClick: () -> Unit
 ) {
-    // Hiệu ứng phình to nhẹ khi đang bật
     val scale by animateFloatAsState(
         targetValue = if (isConnected) 1.05f else 1.0f,
         label = "scale"
@@ -151,7 +145,7 @@ fun ConnectButton(
                 )
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
-                    indication = null // Tắt hiệu ứng ripple mặc định
+                    indication = null
                 ) { onClick() },
             contentAlignment = Alignment.Center
         ) {

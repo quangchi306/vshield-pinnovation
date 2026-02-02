@@ -9,11 +9,6 @@ import java.net.URL
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicReference
 
-/**
- * Quản lý blacklist dạng domain (đã normalize).
- * - Load sample từ assets lần đầu
- * - Có thể update bằng cách download 1 file .txt (URLs hoặc domains) rồi trích host/domain.
- */
 object DomainBlacklist {
     private const val TAG = "DomainBlacklist"
     private const val STORED_FILE = "blacklist_domains.txt"
@@ -56,10 +51,8 @@ object DomainBlacklist {
         val d0 = normalizeDomain(domain) ?: return false
         val snap = snapshotRef.get()
 
-        // Check exact + parent domains (subdomain blocking)
         var d = d0
         while (true) {
-            // Bloom-filter gate (nhanh) rồi confirm bằng HashSet (chắc chắn)
             if (snap.bloom.mightContain(d) && snap.domains.contains(d)) return true
 
             val idx = d.indexOf('.')
@@ -90,7 +83,6 @@ object DomainBlacklist {
                         .toSet()
                 }
 
-                // Persist domain-only list
                 val file = File(appContext.filesDir, STORED_FILE)
                 file.bufferedWriter().use { out ->
                     domains.forEach { out.appendLine(it) }
@@ -115,13 +107,11 @@ object DomainBlacklist {
         if (s.isEmpty()) return null
         if (s.startsWith("#") || s.startsWith("!") || s.startsWith("[")) return null
 
-        // Nếu dạng hosts file: "0.0.0.0 domain"
         val parts = s.split(Regex("\\s+"))
         if (parts.size >= 2 && looksLikeIp(parts[0])) {
             s = parts.last()
         }
 
-        // uBlock: ||domain^
         if (s.startsWith("||")) s = s.removePrefix("||")
         s = s.trimEnd('^')
 
@@ -154,11 +144,7 @@ object DomainBlacklist {
 
         var s = s0.lowercase(Locale.ROOT)
         s = s.removePrefix("*.").removePrefix(".").trimEnd('.')
-
-        // Bỏ port nếu có
         if (s.contains(":")) s = s.substringBefore(":")
-
-        // Filter sơ bộ
         if (!s.contains(".")) return null
         if (s.length < 4) return null
         if (s.any { it.isWhitespace() }) return null
@@ -167,16 +153,12 @@ object DomainBlacklist {
     const val FILTER_SIZE_M = 2_000_000
     const val FILTER_HASH_K = 5
 
-    // URL tải file BIN
     const val BINARY_REMOTE_URL = "https://your-server.com/api/v1/blacklist.bin"
 
     fun updateFromBinary(url: String = BINARY_REMOTE_URL, callback: (Boolean, String) -> Unit) {
         Thread {
             try {
                 val conn = (URL(url).openConnection() as HttpURLConnection)
-                // ... setup connection ...
-
-                // Đọc file binary
                 val bytes = conn.inputStream.readBytes()
 
                 if (bytes.isEmpty()) {
@@ -184,14 +166,11 @@ object DomainBlacklist {
                     return@Thread
                 }
 
-                // Lưu file binary xuống đĩa để cache
                 val file = File(appContext.filesDir, "blacklist.bin")
                 file.writeBytes(bytes)
 
-                // Load vào bộ nhớ
                 val newBloom = BloomFilter.loadFromByteArray(bytes, FILTER_HASH_K, FILTER_SIZE_M)
 
-                // Cập nhật snapshot
                 snapshotRef.set(Snapshot(emptySet(), newBloom))
 
                 callback(true, "Đã cập nhật dữ liệu vệ tinh (Binary size: ${bytes.size} bytes)")
