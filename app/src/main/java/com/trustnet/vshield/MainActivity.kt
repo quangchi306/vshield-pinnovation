@@ -1,129 +1,100 @@
 package com.trustnet.vshield
 
-import android.Manifest
+import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.net.Uri
 import android.net.VpnService
-import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
-import androidx.core.content.ContextCompat
 import com.trustnet.vshield.core.DomainBlacklist
 import com.trustnet.vshield.core.VpnStats
 import com.trustnet.vshield.ui.screen.HomeScreen
-import com.trustnet.vshield.ui.screen.SettingsScreen
 import com.trustnet.vshield.ui.theme.VshieldTheme
-
-enum class AppScreen { HOME, SETTINGS }
 
 class MainActivity : ComponentActivity() {
 
-    private val vpnPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            if (result.resultCode == RESULT_OK) {
-                startVpn()
-            } else {
-                toast("Bạn cần cấp quyền để V-Shield hoạt động.")
-            }
+    private val vpnPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            startVpnService()
+        } else {
+            Toast.makeText(this, "Cần cấp quyền để chạy V-Shield", Toast.LENGTH_SHORT).show()
         }
-
-    private val notifPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-            if (!isGranted) toast("Thông báo bị tắt. Bạn sẽ không thấy trạng thái VPN trên thanh status.")
-        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
+        // Load settings
+        val prefs = getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
+        DomainBlacklist.blockAdult = prefs.getBoolean("BLOCK_ADULT", true)
+        DomainBlacklist.blockGambling = prefs.getBoolean("BLOCK_GAMBLING", true)
 
         setContent {
             VshieldTheme {
-                var currentScreen by remember { mutableStateOf(AppScreen.HOME) }
                 val isRunning by VpnStats.isRunning.observeAsState(initial = false)
                 val blockedCount by VpnStats.blockedCount.observeAsState(initial = 0L)
 
-                BackHandler(enabled = currentScreen == AppScreen.SETTINGS) {
-                    currentScreen = AppScreen.HOME
-                }
-                when (currentScreen) {
-                    AppScreen.HOME -> {
-                        HomeScreen(
-                            isConnected = isRunning,
-                            blockedCount = blockedCount.toString(),
-                            onToggleClick = {
-                                if (isRunning) stopVpn() else requestVpnPermissionAndStart()
-                            },
-                            onSettingsClick = {
-                                currentScreen = AppScreen.SETTINGS
-                            }
-                        )
+                HomeScreen(
+                    isConnected = isRunning,
+                    blockedCount = blockedCount.toString(),
+                    onToggleClick = {
+                        if (isRunning) {
+                            stopVpnService()
+                        } else {
+                            // Trước khi bật VPN, kiểm tra quyền "Display over other apps"
+                            checkPermissionsAndStart()
+                        }
+                    },
+                    onSettingsClick = {
+                        Toast.makeText(this, "Chức năng đang phát triển", Toast.LENGTH_SHORT).show()
                     }
-                    AppScreen.SETTINGS -> {
-                        SettingsScreen(
-                            onBackClick = {
-                                currentScreen = AppScreen.HOME
-                            },
-                            onUpdateBlocklist = {
-                                updateBlacklist()
-                            }
-                        )
-                    }
-                }
+                )
             }
         }
     }
 
+    private fun checkPermissionsAndStart() {
+        // Bước 1: Kiểm tra quyền Hiển thị trên ứng dụng khác
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Vui lòng cấp quyền 'Hiển thị trên ứng dụng khác' để hiện cảnh báo chặn web", Toast.LENGTH_LONG).show()
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent) // Mở cài đặt để user cấp quyền
+            return
+        }
 
-    private fun requestVpnPermissionAndStart() {
+        // Bước 2: Chuẩn bị VPN
+        prepareAndStartVpn()
+    }
+
+    private fun prepareAndStartVpn() {
         val intent = VpnService.prepare(this)
         if (intent != null) {
             vpnPermissionLauncher.launch(intent)
         } else {
-            startVpn()
+            startVpnService()
         }
     }
 
-    private fun startVpn() {
-        val i = Intent(this, VShieldVpnService::class.java).apply {
-            action = VShieldVpnService.ACTION_START
-        }
-        ContextCompat.startForegroundService(this, i)
+    private fun startVpnService() {
+        val intent = Intent(this, VShieldVpnService::class.java)
+        intent.action = VShieldVpnService.ACTION_START
+        startService(intent)
     }
 
-    private fun stopVpn() {
-        val i = Intent(this, VShieldVpnService::class.java).apply {
-            action = VShieldVpnService.ACTION_STOP
-        }
-        startService(i)
-    }
-
-    private fun updateBlacklist() {
-        toast("Đang tải dữ liệu chặn mới nhất...")
-        DomainBlacklist.updateFromUrl(DomainBlacklist.DEFAULT_REMOTE_URL) { success, msg ->
-            runOnUiThread {
-                if (success) {
-                    toast("Cập nhật thành công! $msg")
-                } else {
-                    toast("Lỗi cập nhật: $msg")
-                }
-            }
-        }
-    }
-
-    private fun toast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    private fun stopVpnService() {
+        val intent = Intent(this, VShieldVpnService::class.java)
+        intent.action = VShieldVpnService.ACTION_STOP
+        startService(intent)
     }
 }

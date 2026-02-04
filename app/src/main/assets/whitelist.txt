@@ -1,0 +1,16 @@
+# Danh sách trang web sạch (Whitelist)
+# Các dòng bắt đầu bằng # sẽ bị bỏ qua
+google.com
+facebook.com
+youtube.com
+github.com
+stackoverflow.com
+zingmp3.vn
+vnexpress.net
+shopee.vn
+tiki.vn
+lzada.vn
+# Các cổng thanh toán
+momo.vn
+zalopay.vn
+vnpay.vn

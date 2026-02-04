@@ -1,182 +1,148 @@
-    package com.trustnet.vshield.core
+package com.trustnet.vshield.core
 
 import android.content.Context
 import android.util.Log
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URI
-import java.net.URL
+import java.util.HashSet
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ConcurrentHashMap
 
 object DomainBlacklist {
     private const val TAG = "DomainBlacklist"
-    private const val STORED_FILE = "blacklist_domains.txt"
 
-    const val DEFAULT_REMOTE_URL =
-        "https://raw.githubusercontent.com/elliotwutingfeng/ChongLuaDao-Phishing-Blocklist/main/urls.txt"
+    // Tên các file trong thư mục assets
+    private const val FILE_WHITELIST = "whitelist.txt"
+    private const val FILE_PHISHING = "blacklist_phishing.txt"
+    private const val FILE_ADULT = "blacklist_adult.txt"
+    private const val FILE_GAMBLING = "blacklist_gambling.txt"
 
-    private lateinit var appContext: Context
+    // Cấu hình chặn (User bật/tắt)
+    @Volatile var blockAdult: Boolean = true
+    @Volatile var blockGambling: Boolean = true
 
-    private data class Snapshot(
-        val domains: Set<String>,
-        val bloom: BloomFilter
-    )
+    // Whitelist gốc (HashSet)
+    private val whitelist = HashSet<String>()
 
-    private val snapshotRef = AtomicReference(Snapshot(emptySet(), BloomFilter.empty()))
-    @Volatile private var initialized = false
+    // Whitelist tạm thời (Bypass trong 5 phút) - Dùng ConcurrentHashMap để an toàn đa luồng
+    private val tempWhitelist = ConcurrentHashMap<String, Long>()
+
+    // Blacklist: 3 Bloom Filter
+    private var phishingFilter: BloomFilter? = null
+    private var adultFilter: BloomFilter? = null
+    private var gamblingFilter: BloomFilter? = null
+
+    private var initialized = false
 
     fun init(context: Context) {
         if (initialized) return
         initialized = true
 
-        appContext = context.applicationContext
-        val file = File(appContext.filesDir, STORED_FILE)
+        Log.i(TAG, "Đang khởi tạo bộ lọc...")
 
-        val domains = if (file.exists()) {
-            file.bufferedReader().useLines { seq ->
-                seq.mapNotNull { normalizeDomain(it) }.toSet()
-            }
-        } else {
-            appContext.assets.open("blacklist.txt").bufferedReader().useLines { seq ->
-                seq.mapNotNull { normalizeDomain(it) }.toSet()
-            }
-        }
+        // 1. Load Whitelist
+        loadWhitelist(context)
 
-        applyNewDomains(domains)
-        Log.i(TAG, "Initialized with ${domains.size} domains")
+        // 2. Load Blacklist từ file txt trong assets vào BloomFilter
+        phishingFilter = loadTextToBloomFilter(context, FILE_PHISHING, 50000)
+        adultFilter = loadTextToBloomFilter(context, FILE_ADULT, 20000)
+        gamblingFilter = loadTextToBloomFilter(context, FILE_GAMBLING, 20000)
+
+        Log.i(TAG, "Khởi tạo hoàn tất.")
     }
 
+    // Hàm thêm domain vào whitelist tạm (5 phút)
+    fun addTemporaryAllow(domain: String) {
+        val cleanDomain = normalizeDomain(domain) ?: return
+        // Thời gian hiện tại + 5 phút (300,000 ms)
+        tempWhitelist[cleanDomain] = System.currentTimeMillis() + 300_000
+        Log.i(TAG, "Đã bỏ chặn tạm thời: $cleanDomain")
+    }
+
+    // Hàm kiểm tra chính: Trả về TRUE nếu BỊ CHẶN
     fun isBlocked(domain: String): Boolean {
-        val d0 = normalizeDomain(domain) ?: return false
-        val snap = snapshotRef.get()
+        val cleanDomain = normalizeDomain(domain) ?: return false
 
-        var d = d0
-        while (true) {
-            if (snap.bloom.mightContain(d) && snap.domains.contains(d)) return true
+        // 1. Check Whitelist gốc
+        if (whitelist.contains(cleanDomain)) return false
 
-            val idx = d.indexOf('.')
-            if (idx < 0) break
-            d = d.substring(idx + 1)
+        // 2. Check Whitelist tạm thời (Do người dùng bấm "Vẫn truy cập")
+        val expiryTime = tempWhitelist[cleanDomain]
+        if (expiryTime != null) {
+            if (System.currentTimeMillis() < expiryTime) {
+                return false // Vẫn còn hạn -> Cho qua
+            } else {
+                tempWhitelist.remove(cleanDomain) // Hết hạn -> Xóa
+            }
         }
+
+        // 3. Check Phishing (Luôn chặn)
+        if (phishingFilter?.mightContain(cleanDomain) == true) {
+            Log.w(TAG, "BLOCKED [Phishing]: $cleanDomain")
+            return true
+        }
+
+        // 4. Check Adult (Nếu bật)
+        if (blockAdult && adultFilter?.mightContain(cleanDomain) == true) {
+            Log.w(TAG, "BLOCKED [Adult]: $cleanDomain")
+            return true
+        }
+
+        // 5. Check Gambling (Nếu bật)
+        if (blockGambling && gamblingFilter?.mightContain(cleanDomain) == true) {
+            Log.w(TAG, "BLOCKED [Gambling]: $cleanDomain")
+            return true
+        }
+
         return false
     }
 
-    fun updateFromUrl(url: String = DEFAULT_REMOTE_URL, callback: (ok: Boolean, msg: String) -> Unit) {
-        Thread {
-            try {
-                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 15_000
-                    readTimeout = 15_000
-                    instanceFollowRedirects = true
-                }
-
-                val code = conn.responseCode
-                if (code !in 200..299) {
-                    callback(false, "HTTP $code khi tải blacklist")
-                    return@Thread
-                }
-
-                val domains = conn.inputStream.bufferedReader().useLines { seq ->
-                    seq.mapNotNull { extractDomainFromLine(it) }
-                        .mapNotNull { normalizeDomain(it) }
-                        .toSet()
-                }
-
-                val file = File(appContext.filesDir, STORED_FILE)
-                file.bufferedWriter().use { out ->
-                    domains.forEach { out.appendLine(it) }
-                }
-
-                applyNewDomains(domains)
-                callback(true, "Cập nhật thành công: ${domains.size} domains")
-            } catch (e: Exception) {
-                callback(false, "Update lỗi: ${e.message}")
+    private fun loadWhitelist(context: Context) {
+        whitelist.clear()
+        try {
+            val internalFile = File(context.filesDir, FILE_WHITELIST)
+            val reader = if (internalFile.exists()) {
+                internalFile.bufferedReader()
+            } else {
+                context.assets.open(FILE_WHITELIST).bufferedReader()
             }
-        }.start()
+
+            reader.useLines { lines ->
+                lines.forEach { line ->
+                    normalizeDomain(line)?.let { whitelist.add(it) }
+                }
+            }
+            // Thêm cứng một số domain quan trọng
+            whitelist.add("google.com")
+            whitelist.add("android.com")
+            whitelist.add("gstatic.com")
+            whitelist.add("googleapis.com")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Lỗi load Whitelist: ${e.message}")
+        }
     }
 
-    private fun applyNewDomains(domains: Set<String>) {
-        val bloom = BloomFilter.create(expectedInsertions = domains.size, falsePositiveRate = 1e-3)
-        domains.forEach { bloom.add(it) }
-        snapshotRef.set(Snapshot(domains, bloom))
-    }
-
-    private fun extractDomainFromLine(line: String): String? {
-        var s = line.trim()
-        if (s.isEmpty()) return null
-        if (s.startsWith("#") || s.startsWith("!") || s.startsWith("[")) return null
-
-        val parts = s.split(Regex("\\s+"))
-        if (parts.size >= 2 && looksLikeIp(parts[0])) {
-            s = parts.last()
-        }
-
-        if (s.startsWith("||")) s = s.removePrefix("||")
-        s = s.trimEnd('^')
-
-        // URL?
-        if (s.contains("://")) {
-            return try {
-                URI(s).host
-            } catch (_: Exception) {
-                null
+    private fun loadTextToBloomFilter(context: Context, fileName: String, expectedSize: Int): BloomFilter {
+        val filter = BloomFilter.create(expectedInsertions = expectedSize, falsePositiveRate = 0.001)
+        try {
+            context.assets.open(fileName).bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    normalizeDomain(line)?.let { filter.add(it) }
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Không tìm thấy hoặc lỗi file $fileName: ${e.message}")
         }
-
-        if (s.contains("/")) {
-            return try {
-                URI("http://$s").host
-            } catch (_: Exception) {
-                s.substringBefore("/")
-            }
-        }
-
-        return s
+        return filter
     }
-
-    private fun looksLikeIp(s: String): Boolean = s.count { it == '.' } == 3 && s.all { it.isDigit() || it == '.' }
 
     private fun normalizeDomain(raw: String): String? {
-        val s0 = raw.trim()
-        if (s0.isEmpty()) return null
-        if (s0.startsWith("#") || s0.startsWith("!")) return null
-
-        var s = s0.lowercase(Locale.ROOT)
-        s = s.removePrefix("*.").removePrefix(".").trimEnd('.')
-        if (s.contains(":")) s = s.substringBefore(":")
-        if (!s.contains(".")) return null
-        if (s.length < 4) return null
-        if (s.any { it.isWhitespace() }) return null
+        if (raw.trim().startsWith("#") || raw.isBlank()) return null
+        var s = raw.trim().lowercase(Locale.ROOT)
+        if (s.contains("://")) s = s.substringAfter("://")
+        if (s.contains("/")) s = s.substringBefore("/")
+        s = s.removePrefix("www.").trimEnd('.')
+        if (s.length < 3 || !s.contains(".")) return null
         return s
-    }
-    const val FILTER_SIZE_M = 2_000_000
-    const val FILTER_HASH_K = 5
-
-    const val BINARY_REMOTE_URL = "https://your-server.com/api/v1/blacklist.bin"
-
-    fun updateFromBinary(url: String = BINARY_REMOTE_URL, callback: (Boolean, String) -> Unit) {
-        Thread {
-            try {
-                val conn = (URL(url).openConnection() as HttpURLConnection)
-                val bytes = conn.inputStream.readBytes()
-
-                if (bytes.isEmpty()) {
-                    callback(false, "File binary rỗng")
-                    return@Thread
-                }
-
-                val file = File(appContext.filesDir, "blacklist.bin")
-                file.writeBytes(bytes)
-
-                val newBloom = BloomFilter.loadFromByteArray(bytes, FILTER_HASH_K, FILTER_SIZE_M)
-
-                snapshotRef.set(Snapshot(emptySet(), newBloom))
-
-                callback(true, "Đã cập nhật dữ liệu vệ tinh (Binary size: ${bytes.size} bytes)")
-            } catch (e: Exception) {
-                callback(false, "Lỗi update: ${e.message}")
-            }
-        }.start()
     }
 }
