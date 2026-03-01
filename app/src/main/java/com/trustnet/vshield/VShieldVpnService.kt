@@ -126,7 +126,7 @@ class VShieldVpnService : VpnService() {
         }
     }
 
-    // --- HÀM MỚI: MỞ MÀN HÌNH CHẶN ---
+    //MỞ MÀN HÌNH CHẶN
     fun openBlockingScreen(domain: String) {
         // Kiểm tra quyền "Display over other apps"
         if (Settings.canDrawOverlays(this)) {
@@ -136,14 +136,13 @@ class VShieldVpnService : VpnService() {
             intent.putExtra("BLOCKED_DOMAIN", domain)
             startActivity(intent)
         } else {
-            // Nếu chưa cấp quyền, đành hiện thông báo như cũ
+            // Nếu chưa cấp quyền, hiện thông báo như cũ
             showBlockingNotification(domain)
         }
     }
 
-    // Giữ lại hàm thông báo để fallback
+    // thông báo fallback
     fun showBlockingNotification(domain: String) {
-        // ... (Giữ nguyên code hàm này từ bài trước nếu muốn, hoặc bỏ qua)
     }
 
     companion object {
