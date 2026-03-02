@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import com.trustnet.vshield.VShieldVpnService
 import com.trustnet.vshield.core.DomainBlacklist
 
+
 @Composable
 fun HomeScreen(
     isConnected: Boolean,
@@ -86,7 +87,7 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // --- BẢNG ĐIỀU KHIỂN BỘ LỌC ---
+            //BẢNG ĐIỀU KHIỂN BỘ LỌC
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
@@ -126,7 +127,6 @@ fun HomeScreen(
             }
 
             Spacer(modifier = Modifier.weight(0.1f))
-
             StatsDashboard(isConnected, blockedCount)
         }
     }
