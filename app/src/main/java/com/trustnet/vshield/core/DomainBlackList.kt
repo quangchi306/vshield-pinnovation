@@ -50,7 +50,6 @@ object DomainBlacklist {
         Log.i(TAG, "Khởi tạo hoàn tất.")
     }
 
-    // Hàm thêm domain vào whitelist tạm (5 phút)
     fun addTemporaryAllow(domain: String) {
         val cleanDomain = normalizeDomain(domain) ?: return
         // Thời gian hiện tại + 5 phút (300,000 ms)
@@ -58,12 +57,33 @@ object DomainBlacklist {
         Log.i(TAG, "Đã bỏ chặn tạm thời: $cleanDomain")
     }
 
-    // Hàm kiểm tra chính: Trả về TRUE nếu BỊ CHẶN
+    /**
+     * HÀM MỚI: Kiểm tra Whitelist thông minh (Bao trọn cả họ hàng Subdomain)
+     */
+    fun isWhitelisted(domain: String): Boolean {
+        val cleanDomain = normalizeDomain(domain) ?: return false
+
+        // 1. Kiểm tra khớp chính xác 100% (Ví dụ: "google.com")
+        if (whitelist.contains(cleanDomain)) {
+            return true
+        }
+
+        // 2. Kiểm tra khớp tên miền con (Ví dụ: "fonts.googleapis.com" có chứa đuôi ".googleapis.com")
+        for (safeDomain in whitelist) {
+            if (cleanDomain.endsWith(".$safeDomain")) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    // Hàm kiểm tra chính: Trả về TRUE nếu BỊ CHẶN (Local Blacklist)
     fun isBlocked(domain: String): Boolean {
         val cleanDomain = normalizeDomain(domain) ?: return false
 
         // 1. Check Whitelist gốc
-        if (whitelist.contains(cleanDomain)) return false
+        if (isWhitelisted(cleanDomain)) return false
 
         // 2. Check Whitelist tạm thời (Do người dùng bấm "Vẫn truy cập")
         val expiryTime = tempWhitelist[cleanDomain]
@@ -111,11 +131,16 @@ object DomainBlacklist {
                     normalizeDomain(line)?.let { whitelist.add(it) }
                 }
             }
-            // Thêm cứng một số domain quan trọng
+
+            // --- THÊM CỨNG CÁC DOMAIN HẠ TẦNG SẠCH ĐỂ TỐI ƯU ---
             whitelist.add("google.com")
             whitelist.add("android.com")
             whitelist.add("gstatic.com")
             whitelist.add("googleapis.com")
+            whitelist.add("vnecdn.net")
+            whitelist.add("eclick.vn")
+            whitelist.add("facebook.com")
+            whitelist.add("facebook.net")
 
         } catch (e: Exception) {
             Log.e(TAG, "Lỗi load Whitelist: ${e.message}")
