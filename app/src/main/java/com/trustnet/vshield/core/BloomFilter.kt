@@ -40,17 +40,24 @@ class BloomFilter private constructor(
     }
 
     companion object {
-        fun create(expectedInsertions: Int, falsePositiveRate: Double = 1e-3): BloomFilter {
+        fun create(expectedInsertions: Int, falsePositiveRate: Double = 0.0000001): BloomFilter {
             val n = expectedInsertions.coerceAtLeast(1)
             val p = falsePositiveRate.coerceIn(1e-9, 0.5)
             val m = (-(n * ln(p)) / (ln(2.0) * ln(2.0))).roundToInt().coerceAtLeast(64)
-            val k = ((m.toDouble() / n) * ln(2.0)).roundToInt().coerceIn(1, 10)
+            // SỬA Ở ĐÂY: Nâng giới hạn k lên 30 để hỗ trợ tỷ lệ 0.00001%
+            val k = ((m.toDouble() / n) * ln(2.0)).roundToInt().coerceIn(1, 30)
 
             return BloomFilter(m, k)
         }
 
-        fun loadFromByteArray(data: ByteArray, numHashes: Int, expectedSize: Int): BloomFilter {
-            val filter = BloomFilter(expectedSize, numHashes)
+        // Cập nhật hàm load: Cần truyền vào số lượng domain dự kiến và FPR để tính lại m và k
+        fun loadFromByteArray(data: ByteArray, expectedInsertions: Int, falsePositiveRate: Double = 0.0000001): BloomFilter {
+            val n = expectedInsertions.coerceAtLeast(1)
+            val p = falsePositiveRate.coerceIn(1e-9, 0.5)
+            val m = (-(n * ln(p)) / (ln(2.0) * ln(2.0))).roundToInt().coerceAtLeast(64)
+            val k = ((m.toDouble() / n) * ln(2.0)).roundToInt().coerceIn(1, 30)
+
+            val filter = BloomFilter(m, k)
             filter.bits.clear()
             val loadedBits = BitSet.valueOf(data)
             filter.bits.or(loadedBits)
@@ -58,10 +65,9 @@ class BloomFilter private constructor(
             return filter
         }
 
-
         fun empty(): BloomFilter = BloomFilter(64, 1)
 
-        // MurmurHash3 x86 32-bit
+        // MurmurHash3 x86 32-bit (Giữ nguyên của bạn)
         private fun murmur3_32(data: ByteArray, seed: Int): Int {
             var h1 = seed
             val c1 = 0xcc9e2d51.toInt()
@@ -97,7 +103,6 @@ class BloomFilter private constructor(
             }
 
             h1 = h1 xor data.size
-            // fmix
             h1 = h1 xor (h1 ushr 16)
             h1 *= 0x85ebca6b.toInt()
             h1 = h1 xor (h1 ushr 13)
@@ -106,6 +111,7 @@ class BloomFilter private constructor(
             return h1
         }
     }
+
     fun toByteArray(): ByteArray {
         return bits.toByteArray()
     }
