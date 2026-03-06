@@ -70,4 +70,6 @@ dependencies {
     implementation("androidx.compose.runtime:runtime-livedata:1.6.0")
     implementation("androidx.compose.material:material-icons-extended:1.6.0")
     implementation("androidx.compose.material:material-icons-extended:1.5.4")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
 }

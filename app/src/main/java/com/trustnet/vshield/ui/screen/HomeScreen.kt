@@ -32,6 +32,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.trustnet.vshield.vpn.dns.DnsTestClient
+import com.trustnet.vshield.parenting.ParentAction
+import com.trustnet.vshield.ui.parenting.LocalParentGate
 
 @Composable
 fun HomeScreen(
@@ -42,6 +44,10 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
 
+    // Patch 2: lấy gate
+    val gate = LocalParentGate.current
+
+    // State quản lý nút gạt (Lấy giá trị thực tế từ biến Static)
     // State quản lý nút gạt
     var isAdultBlocked by remember { mutableStateOf(DomainBlacklist.blockAdult) }
     var isGamblingBlocked by remember { mutableStateOf(DomainBlacklist.blockGambling) }
@@ -65,10 +71,6 @@ fun HomeScreen(
         animationSpec = tween(500), label = "iconColor"
     )
 
-    if (showTestDialog) {
-        DnsTestDialog(onDismiss = { showTestDialog = false })
-    }
-
     Scaffold(
         containerColor = backgroundColor,
         topBar = { TopAppBar(isConnected, onSettingsClick) }
@@ -86,11 +88,18 @@ fun HomeScreen(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.weight(0.5f)
             ) {
+                // Patch 3: gate nút bật/tắt VPN
                 ConnectButton(
                     isConnected = isConnected,
                     buttonColor = buttonColor,
                     iconColor = iconColor,
-                    onClick = onToggleClick
+                    onClick = {
+                        val action =
+                            if (isConnected) ParentAction.ToggleProtectionOff
+                            else ParentAction.ToggleProtectionOn
+
+                        gate.protect(action) { onToggleClick() }
+                    }
                 )
             }
 
@@ -111,23 +120,33 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    // 1. Chặn Adult
                     FilterSwitchRow(
                         label = "Web người lớn (Adult)",
                         checked = isAdultBlocked,
+
+                        // Patch 4: gate đổi filter
                         onCheckedChange = { checked ->
-                            isAdultBlocked = checked
-                            handleSettingChange(context, checked, isGamblingBlocked)
+                            gate.protect(ParentAction.ChangeFilterConfig) {
+                                isAdultBlocked = checked
+                                handleSettingChange(context, checked, isGamblingBlocked)
+                            }
                         }
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
+                    Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
 
+                    // 2. Chặn Gambling
                     FilterSwitchRow(
                         label = "Cờ bạc (Gambling)",
                         checked = isGamblingBlocked,
+
+                        // Patch 4: gate đổi filter
                         onCheckedChange = { checked ->
-                            isGamblingBlocked = checked
-                            handleSettingChange(context, isAdultBlocked, checked)
+                            gate.protect(ParentAction.ChangeFilterConfig) {
+                                isGamblingBlocked = checked
+                                handleSettingChange(context, isAdultBlocked, checked)
+                            }
                         }
                     )
                 }
@@ -136,117 +155,29 @@ fun HomeScreen(
             Spacer(modifier = Modifier.weight(0.1f))
 
             StatsDashboard(isConnected, blockedCount)
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // --- NÚT GỌI HỘP THOẠI TEST DNS ---
-            OutlinedButton(
-                onClick = {
-                    if (isConnected) {
-                        showTestDialog = true
-                    } else {
-                        Toast.makeText(context, "Vui lòng bật V-Shield trước khi Test", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Dns, contentDescription = "Test DNS")
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Công cụ Test DNS")
-            }
         }
     }
 }
 
-// ==========================================
-// COMPOSABLE HỘP THOẠI TEST DNS AN TOÀN TRÊN LUỒNG NỀN
-// ==========================================
-@Composable
-fun DnsTestDialog(onDismiss: () -> Unit) {
-    var domain by remember { mutableStateOf("") }
-    var result by remember { mutableStateOf("") }
-    var isTesting by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Test DNS Filter", fontWeight = FontWeight.Bold) },
-        text = {
-            Column {
-                Text("Nhập domain để kiểm tra xem hệ thống có đang chặn nó hay không.")
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = domain,
-                    onValueChange = { domain = it },
-                    label = { Text("vd: example.com") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (isTesting) {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-                } else if (result.isNotEmpty()) {
-                    Text(
-                        text = "Kết quả:\n$result",
-                        fontWeight = FontWeight.Bold,
-                        color = if (result.contains("BỊ CHẶN")) Color.Red else Color(0xFF007700)
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (domain.isNotBlank()) {
-                        isTesting = true
-                        result = ""
-                        // ⚡ Kích hoạt Coroutine chạy ngầm để gửi UDP Socket
-                        coroutineScope.launch(Dispatchers.IO) {
-                            try {
-                                val res = DnsTestClient.testA(domain)
-                                // Trả kết quả về luồng UI
-                                withContext(Dispatchers.Main) {
-                                    result = res
-                                    isTesting = false
-                                }
-                            } catch (e: Exception) {
-                                withContext(Dispatchers.Main) {
-                                    result = "Lỗi kết nối: ${e.message}\n(Đảm bảo VPN đang bật)"
-                                    isTesting = false
-                                }
-                            }
-                        }
-                    }
-                }
-            ) {
-                Text("Kiểm tra")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Đóng")
-            }
-        }
-    )
-}
-
-// --- CÁC HÀM CŨ GIỮ NGUYÊN BÊN DƯỚI ---
-
+// --- HÀM XỬ LÝ LOGIC MỚI ---
 fun handleSettingChange(context: Context, blockAdult: Boolean, blockGambling: Boolean) {
+    // 1. Lưu cấu hình vào SharedPreferences
     val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
     prefs.edit()
         .putBoolean("BLOCK_ADULT", blockAdult)
         .putBoolean("BLOCK_GAMBLING", blockGambling)
         .apply()
 
+    // 2. Cập nhật biến static để lưu trạng thái
     DomainBlacklist.blockAdult = blockAdult
     DomainBlacklist.blockGambling = blockGambling
 
+    // 3. QUAN TRỌNG: Gửi lệnh STOP service (Tắt VPN)
     val intent = Intent(context, VShieldVpnService::class.java)
     intent.action = VShieldVpnService.ACTION_STOP
     context.startService(intent)
 
+    // 4. Thông báo cho người dùng
     Toast.makeText(context, "Đã lưu cài đặt. Vui lòng bật lại VPN!", Toast.LENGTH_SHORT).show()
 }
 
@@ -271,9 +202,11 @@ fun TopAppBar(isConnected: Boolean, onSettingsClick: () -> Unit) {
     ) {
         Column {
             Text("V-Shield Home", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(if (isConnected) "Đang bảo vệ" else "Đã tắt",
+            Text(
+                if (isConnected) "Đang bảo vệ" else "Đã tắt",
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+            )
         }
         IconButton(onClick = onSettingsClick) {
             Icon(Icons.Outlined.Settings, contentDescription = "Settings")
@@ -317,9 +250,17 @@ fun StatsDashboard(isConnected: Boolean, blockedCount: String) {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
     ) {
-        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround
+        ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(blockedCount, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    blockedCount,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 Text("Đã chặn", style = MaterialTheme.typography.bodySmall)
             }
         }
