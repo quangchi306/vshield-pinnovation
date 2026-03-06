@@ -72,6 +72,7 @@ object DomainBlacklist {
         val clean = normalizeDomain(domain) ?: return null
         val candidates = domainCandidates(clean)
 
+        // 1. Temp whitelist (bypass 5 phút)
         val now = System.currentTimeMillis()
         for (c in candidates) {
             val expiry = tempWhitelist[c]
@@ -81,7 +82,7 @@ object DomainBlacklist {
             }
         }
 
-        //Whitelist BloomFilter
+        // 2. Whitelist BloomFilter
         val wf = whitelistFilter.get()
         if (wf != null) {
             for (c in candidates) {
@@ -92,10 +93,18 @@ object DomainBlacklist {
             }
         }
 
-        Log.i(TAG, "Khởi tạo hoàn tất.")
-    }
+        // 3. Phishing
+        val pf = phishingFilter.get()
+        if (pf != null) {
+            for (c in candidates) {
+                if (pf.mightContain(c)) {
+                    Log.w(TAG, "BLOCKED [Phishing]: $c (query=$clean)")
+                    return BlockMatch(BlockCategory.PHISHING, c)
+                }
+            }
+        }
 
-        //Adult
+        // 4. Adult
         if (blockAdult) {
             val af = adultFilter.get()
             if (af != null) {
@@ -108,7 +117,7 @@ object DomainBlacklist {
             }
         }
 
-        //Gambling
+        // 5. Gambling
         if (blockGambling) {
             val gf = gamblingFilter.get()
             if (gf != null) {
