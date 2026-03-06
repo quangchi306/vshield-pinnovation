@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +28,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.trustnet.vshield.VShieldVpnService
 import com.trustnet.vshield.core.DomainBlacklist
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.trustnet.vshield.vpn.dns.DnsTestClient
 
 @Composable
 fun HomeScreen(
@@ -37,9 +42,12 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
 
-    // State quản lý nút gạt (Lấy giá trị thực tế từ biến Static)
+    // State quản lý nút gạt
     var isAdultBlocked by remember { mutableStateOf(DomainBlacklist.blockAdult) }
     var isGamblingBlocked by remember { mutableStateOf(DomainBlacklist.blockGambling) }
+
+    // State hiển thị hộp thoại Test DNS
+    var showTestDialog by remember { mutableStateOf(false) }
 
     // Hiệu ứng màu nền
     val backgroundColor by animateColorAsState(
@@ -56,6 +64,10 @@ fun HomeScreen(
         targetValue = if (isConnected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
         animationSpec = tween(500), label = "iconColor"
     )
+
+    if (showTestDialog) {
+        DnsTestDialog(onDismiss = { showTestDialog = false })
+    }
 
     Scaffold(
         containerColor = backgroundColor,
@@ -99,26 +111,22 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // 1. Chặn Adult
                     FilterSwitchRow(
                         label = "Web người lớn (Adult)",
                         checked = isAdultBlocked,
                         onCheckedChange = { checked ->
                             isAdultBlocked = checked
-                            // Gọi hàm xử lý thay đổi
                             handleSettingChange(context, checked, isGamblingBlocked)
                         }
                     )
 
-                    Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
 
-                    // 2. Chặn Gambling
                     FilterSwitchRow(
                         label = "Cờ bạc (Gambling)",
                         checked = isGamblingBlocked,
                         onCheckedChange = { checked ->
                             isGamblingBlocked = checked
-                            // Gọi hàm xử lý thay đổi
                             handleSettingChange(context, isAdultBlocked, checked)
                         }
                     )
@@ -128,30 +136,117 @@ fun HomeScreen(
             Spacer(modifier = Modifier.weight(0.1f))
 
             StatsDashboard(isConnected, blockedCount)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // --- NÚT GỌI HỘP THOẠI TEST DNS ---
+            OutlinedButton(
+                onClick = {
+                    if (isConnected) {
+                        showTestDialog = true
+                    } else {
+                        Toast.makeText(context, "Vui lòng bật V-Shield trước khi Test", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Dns, contentDescription = "Test DNS")
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Công cụ Test DNS")
+            }
         }
     }
 }
 
-// --- HÀM XỬ LÝ LOGIC MỚI ---
+// ==========================================
+// COMPOSABLE HỘP THOẠI TEST DNS AN TOÀN TRÊN LUỒNG NỀN
+// ==========================================
+@Composable
+fun DnsTestDialog(onDismiss: () -> Unit) {
+    var domain by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf("") }
+    var isTesting by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Test DNS Filter", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text("Nhập domain để kiểm tra xem hệ thống có đang chặn nó hay không.")
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = domain,
+                    onValueChange = { domain = it },
+                    label = { Text("vd: example.com") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (isTesting) {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                } else if (result.isNotEmpty()) {
+                    Text(
+                        text = "Kết quả:\n$result",
+                        fontWeight = FontWeight.Bold,
+                        color = if (result.contains("BỊ CHẶN")) Color.Red else Color(0xFF007700)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (domain.isNotBlank()) {
+                        isTesting = true
+                        result = ""
+                        // ⚡ Kích hoạt Coroutine chạy ngầm để gửi UDP Socket
+                        coroutineScope.launch(Dispatchers.IO) {
+                            try {
+                                val res = DnsTestClient.testA(domain)
+                                // Trả kết quả về luồng UI
+                                withContext(Dispatchers.Main) {
+                                    result = res
+                                    isTesting = false
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    result = "Lỗi kết nối: ${e.message}\n(Đảm bảo VPN đang bật)"
+                                    isTesting = false
+                                }
+                            }
+                        }
+                    }
+                }
+            ) {
+                Text("Kiểm tra")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Đóng")
+            }
+        }
+    )
+}
+
+// --- CÁC HÀM CŨ GIỮ NGUYÊN BÊN DƯỚI ---
+
 fun handleSettingChange(context: Context, blockAdult: Boolean, blockGambling: Boolean) {
-    // 1. Lưu cấu hình vào SharedPreferences
     val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
     prefs.edit()
         .putBoolean("BLOCK_ADULT", blockAdult)
         .putBoolean("BLOCK_GAMBLING", blockGambling)
         .apply()
 
-    // 2. Cập nhật biến static để lưu trạng thái
     DomainBlacklist.blockAdult = blockAdult
     DomainBlacklist.blockGambling = blockGambling
 
-    // 3. QUAN TRỌNG: Gửi lệnh STOP service (Tắt VPN)
-    // Thay vì gửi lệnh UPDATE, ta gửi lệnh STOP để buộc VPN ngắt kết nối
     val intent = Intent(context, VShieldVpnService::class.java)
     intent.action = VShieldVpnService.ACTION_STOP
     context.startService(intent)
 
-    // 4. Thông báo cho người dùng
     Toast.makeText(context, "Đã lưu cài đặt. Vui lòng bật lại VPN!", Toast.LENGTH_SHORT).show()
 }
 
@@ -199,7 +294,6 @@ fun ConnectButton(isConnected: Boolean, buttonColor: Color, iconColor: Color, on
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            // Logic Icon: Nếu đang kết nối -> Khiên. Nếu tắt -> Nút nguồn.
             imageVector = if (isConnected) Icons.Filled.Security else Icons.Filled.PowerSettingsNew,
             contentDescription = "Connect",
             tint = iconColor,

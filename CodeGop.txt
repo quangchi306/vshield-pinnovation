@@ -533,6 +533,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -546,6 +547,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.trustnet.vshield.VShieldVpnService
 import com.trustnet.vshield.core.DomainBlacklist
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.trustnet.vshield.vpn.dns.DnsTestClient
 
 @Composable
 fun HomeScreen(
@@ -556,9 +561,12 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
 
-    // State quản lý nút gạt (Lấy giá trị thực tế từ biến Static)
+    // State quản lý nút gạt
     var isAdultBlocked by remember { mutableStateOf(DomainBlacklist.blockAdult) }
     var isGamblingBlocked by remember { mutableStateOf(DomainBlacklist.blockGambling) }
+
+    // State hiển thị hộp thoại Test DNS
+    var showTestDialog by remember { mutableStateOf(false) }
 
     // Hiệu ứng màu nền
     val backgroundColor by animateColorAsState(
@@ -575,6 +583,10 @@ fun HomeScreen(
         targetValue = if (isConnected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
         animationSpec = tween(500), label = "iconColor"
     )
+
+    if (showTestDialog) {
+        DnsTestDialog(onDismiss = { showTestDialog = false })
+    }
 
     Scaffold(
         containerColor = backgroundColor,
@@ -618,26 +630,22 @@ fun HomeScreen(
                     )
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    // 1. Chặn Adult
                     FilterSwitchRow(
                         label = "Web người lớn (Adult)",
                         checked = isAdultBlocked,
                         onCheckedChange = { checked ->
                             isAdultBlocked = checked
-                            // Gọi hàm xử lý thay đổi
                             handleSettingChange(context, checked, isGamblingBlocked)
                         }
                     )
 
-                    Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
 
-                    // 2. Chặn Gambling
                     FilterSwitchRow(
                         label = "Cờ bạc (Gambling)",
                         checked = isGamblingBlocked,
                         onCheckedChange = { checked ->
                             isGamblingBlocked = checked
-                            // Gọi hàm xử lý thay đổi
                             handleSettingChange(context, isAdultBlocked, checked)
                         }
                     )
@@ -647,30 +655,117 @@ fun HomeScreen(
             Spacer(modifier = Modifier.weight(0.1f))
 
             StatsDashboard(isConnected, blockedCount)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // --- NÚT GỌI HỘP THOẠI TEST DNS ---
+            OutlinedButton(
+                onClick = {
+                    if (isConnected) {
+                        showTestDialog = true
+                    } else {
+                        Toast.makeText(context, "Vui lòng bật V-Shield trước khi Test", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Dns, contentDescription = "Test DNS")
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Công cụ Test DNS")
+            }
         }
     }
 }
 
-// --- HÀM XỬ LÝ LOGIC MỚI ---
+// ==========================================
+// COMPOSABLE HỘP THOẠI TEST DNS AN TOÀN TRÊN LUỒNG NỀN
+// ==========================================
+@Composable
+fun DnsTestDialog(onDismiss: () -> Unit) {
+    var domain by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf("") }
+    var isTesting by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Test DNS Filter", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text("Nhập domain để kiểm tra xem hệ thống có đang chặn nó hay không.")
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = domain,
+                    onValueChange = { domain = it },
+                    label = { Text("vd: example.com") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (isTesting) {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                } else if (result.isNotEmpty()) {
+                    Text(
+                        text = "Kết quả:\n$result",
+                        fontWeight = FontWeight.Bold,
+                        color = if (result.contains("BỊ CHẶN")) Color.Red else Color(0xFF007700)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (domain.isNotBlank()) {
+                        isTesting = true
+                        result = ""
+                        // ⚡ Kích hoạt Coroutine chạy ngầm để gửi UDP Socket
+                        coroutineScope.launch(Dispatchers.IO) {
+                            try {
+                                val res = DnsTestClient.testA(domain)
+                                // Trả kết quả về luồng UI
+                                withContext(Dispatchers.Main) {
+                                    result = res
+                                    isTesting = false
+                                }
+                            } catch (e: Exception) {
+                                withContext(Dispatchers.Main) {
+                                    result = "Lỗi kết nối: ${e.message}\n(Đảm bảo VPN đang bật)"
+                                    isTesting = false
+                                }
+                            }
+                        }
+                    }
+                }
+            ) {
+                Text("Kiểm tra")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Đóng")
+            }
+        }
+    )
+}
+
+// --- CÁC HÀM CŨ GIỮ NGUYÊN BÊN DƯỚI ---
+
 fun handleSettingChange(context: Context, blockAdult: Boolean, blockGambling: Boolean) {
-    // 1. Lưu cấu hình vào SharedPreferences
     val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
     prefs.edit()
         .putBoolean("BLOCK_ADULT", blockAdult)
         .putBoolean("BLOCK_GAMBLING", blockGambling)
         .apply()
 
-    // 2. Cập nhật biến static để lưu trạng thái
     DomainBlacklist.blockAdult = blockAdult
     DomainBlacklist.blockGambling = blockGambling
 
-    // 3. QUAN TRỌNG: Gửi lệnh STOP service (Tắt VPN)
-    // Thay vì gửi lệnh UPDATE, ta gửi lệnh STOP để buộc VPN ngắt kết nối
     val intent = Intent(context, VShieldVpnService::class.java)
     intent.action = VShieldVpnService.ACTION_STOP
     context.startService(intent)
 
-    // 4. Thông báo cho người dùng
     Toast.makeText(context, "Đã lưu cài đặt. Vui lòng bật lại VPN!", Toast.LENGTH_SHORT).show()
 }
 
@@ -718,7 +813,6 @@ fun ConnectButton(isConnected: Boolean, buttonColor: Color, iconColor: Color, on
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            // Logic Icon: Nếu đang kết nối -> Khiên. Nếu tắt -> Nút nguồn.
             imageVector = if (isConnected) Icons.Filled.Security else Icons.Filled.PowerSettingsNew,
             contentDescription = "Connect",
             tint = iconColor,
@@ -1534,39 +1628,55 @@ class DnsVpnWorker(
         }
         // --- 2. CHỐT CHẶN 2: TÊN MIỀN TRẮNG (An toàn tuyệt đối) ---
         else if (qDomain.endsWith(".arpa") || DomainBlacklist.isWhitelisted(qDomain)) {
-            // Không log để tránh spam rác logcat, đi thẳng ra mạng luôn!
             responsePayload = forwardToUpstream(dnsPayload)
         }
-        // --- 3. ĐƯA LÊN TRINH SÁT & AI PHÂN TÍCH ---
+        // --- 3. ĐƯA LÊN TRINH SÁT & AI PHÂN TÍCH (ASYNCHRONOUS ZERO-LATENCY) ---
         else {
-            var isBlockedByAi = AiResultCache.get(qDomain)
-
-            if (isBlockedByAi == null) {
-                // Đánh dấu đang xử lý, rớt luôn các truy vấn trùng lặp (DNS Retry)
-                if (inProgressDomains.putIfAbsent(qDomain, true) != null) return
-
-                try {
-                    // Chờ qua trạm thu phí (chỉ cho 4 luồng chạy Jsoup cùng lúc)
-                    aiScraperSemaphore.withPermit {
-                        isBlockedByAi = LocalScraper.scrapeAndAnalyze(qDomain, service)
-                        AiResultCache.put(qDomain, isBlockedByAi!!)
-                    }
-                } finally {
-                    // Xong việc thì xóa khỏi danh sách in-progress
-                    inProgressDomains.remove(qDomain)
-                }
-            }
+            val isBlockedByAi = AiResultCache.get(qDomain)
 
             if (isBlockedByAi == true) {
+                // Đã có kết quả AI từ trước và là web xấu -> Chặn ngay lập tức
                 val count = blocked.incrementAndGet()
                 VpnStats.blockedCount.postValue(count)
                 VpnStats.lastBlockedDomain.postValue(qDomain)
 
                 mainHandler.post { service.openBlockingScreen(qDomain) }
                 responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
-                Log.d("VShield", "BLOCKED BY AI: $qDomain")
-            } else {
+                Log.d("VShield", "BLOCKED BY AI (Cache hit): $qDomain")
+            }
+            else if (isBlockedByAi == false) {
+                // Đã có kết quả AI là web sạch -> Cho qua luôn
                 responsePayload = forwardToUpstream(dnsPayload)
+            }
+            else {
+                // CHƯA CÓ KẾT QUẢ (Domain mới) -> THẢ TRƯỚC, CHẶN SAU
+
+                // 1. CHOP PHÉP TRÌNH DUYỆT ĐI TIẾP NGAY LẬP TỨC
+                responsePayload = forwardToUpstream(dnsPayload)
+
+                // 2. KÍCH HOẠT SCRAPER CHẠY NGẦM (Fire and Forget)
+                if (inProgressDomains.putIfAbsent(qDomain, true) == null) {
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            // Chờ qua trạm thu phí (chỉ cho tối đa 4 luồng Scrape chạy cùng lúc bảo vệ RAM)
+                            aiScraperSemaphore.withPermit {
+                                Log.d("VShield", "🔍 Đang trinh sát ngầm: $qDomain")
+                                val isBad = LocalScraper.scrapeAndAnalyze(qDomain, service)
+
+                                // Lưu kết quả vào Cache để đón lõng các request tiếp theo của chính domain này
+                                AiResultCache.put(qDomain, isBad)
+
+                                if (isBad) {
+                                    Log.w("VShield", "🚨 PHÁT HIỆN TRỄ (LATE BLOCK): $qDomain. Đã đưa vào Blacklist RAM!")
+                                    // Tùy chọn: Thêm rung điện thoại nhẹ hoặc Toast báo hiệu cho user ở đây
+                                }
+                            }
+                        } finally {
+                            // Xong việc thì xóa khỏi danh sách in-progress
+                            inProgressDomains.remove(qDomain)
+                        }
+                    }
+                }
             }
         }
 
@@ -1663,111 +1773,6 @@ class DnsVpnWorker(
             queue.forEach { it.close() }
             queue.clear()
         }
-    }
-}
-
-========================================
-FILE: ./app/src/main/java/com/trustnet/vshield/MainActivity.kt
-========================================
-
-package com.trustnet.vshield
-
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.net.VpnService
-import android.os.Bundle
-import android.provider.Settings
-import android.widget.Toast
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.livedata.observeAsState
-import com.trustnet.vshield.core.DomainBlacklist
-import com.trustnet.vshield.core.VpnStats
-import com.trustnet.vshield.ui.screen.HomeScreen
-import com.trustnet.vshield.ui.theme.VshieldTheme
-
-class MainActivity : ComponentActivity() {
-
-    private val vpnPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            startVpnService()
-        } else {
-            Toast.makeText(this, "Cần cấp quyền để chạy V-Shield", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-        // Load settings
-        val prefs = getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
-        DomainBlacklist.blockAdult = prefs.getBoolean("BLOCK_ADULT", true)
-        DomainBlacklist.blockGambling = prefs.getBoolean("BLOCK_GAMBLING", true)
-
-        setContent {
-            VshieldTheme {
-                val isRunning by VpnStats.isRunning.observeAsState(initial = false)
-                val blockedCount by VpnStats.blockedCount.observeAsState(initial = 0L)
-
-                HomeScreen(
-                    isConnected = isRunning,
-                    blockedCount = blockedCount.toString(),
-                    onToggleClick = {
-                        if (isRunning) {
-                            stopVpnService()
-                        } else {
-                            // Trước khi bật VPN, kiểm tra quyền "Display over other apps"
-                            checkPermissionsAndStart()
-                        }
-                    },
-                    onSettingsClick = {
-                        Toast.makeText(this, "Chức năng đang phát triển", Toast.LENGTH_SHORT).show()
-                    }
-                )
-            }
-        }
-    }
-
-    private fun checkPermissionsAndStart() {
-        // Bước 1: Kiểm tra quyền Hiển thị trên ứng dụng khác
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Vui lòng cấp quyền 'Hiển thị trên ứng dụng khác' để hiện cảnh báo chặn web", Toast.LENGTH_LONG).show()
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-            startActivity(intent) // Mở cài đặt để user cấp quyền
-            return
-        }
-
-        // Bước 2: Chuẩn bị VPN
-        prepareAndStartVpn()
-    }
-
-    private fun prepareAndStartVpn() {
-        val intent = VpnService.prepare(this)
-        if (intent != null) {
-            vpnPermissionLauncher.launch(intent)
-        } else {
-            startVpnService()
-        }
-    }
-
-    private fun startVpnService() {
-        val intent = Intent(this, VShieldVpnService::class.java)
-        intent.action = VShieldVpnService.ACTION_START
-        startService(intent)
-    }
-
-    private fun stopVpnService() {
-        val intent = Intent(this, VShieldVpnService::class.java)
-        intent.action = VShieldVpnService.ACTION_STOP
-        startService(intent)
     }
 }
 
@@ -1943,6 +1948,129 @@ class VShieldVpnService : VpnService() {
 
 
 ========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/MainActivity.kt
+========================================
+
+package com.trustnet.vshield
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.net.VpnService
+import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalContext
+import com.trustnet.vshield.core.DomainBlacklist
+import com.trustnet.vshield.core.VpnStats
+import com.trustnet.vshield.ui.screen.HomeScreen
+import com.trustnet.vshield.ui.screen.SettingsScreen
+import com.trustnet.vshield.ui.theme.VshieldTheme
+
+class MainActivity : ComponentActivity() {
+
+    private val vpnPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            startVpnService()
+        } else {
+            Toast.makeText(this, "Cần cấp quyền để chạy V-Shield", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        // Load settings (filters)
+        val prefs = getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
+        DomainBlacklist.blockAdult = prefs.getBoolean("BLOCK_ADULT", true)
+        DomainBlacklist.blockGambling = prefs.getBoolean("BLOCK_GAMBLING", true)
+
+        setContent {
+            VshieldTheme {
+                val context = LocalContext.current
+                val isRunning by VpnStats.isRunning.observeAsState(initial = false)
+                val blockedCount by VpnStats.blockedCount.observeAsState(initial = 0L)
+
+                var showSettings by rememberSaveable { mutableStateOf(false) }
+
+                if (showSettings) {
+                    SettingsScreen(
+                        onBackClick = { showSettings = false },
+                        onUpdateBlocklist = {
+                            // TODO: gắn logic update blocklist thật sự (download/parse/replace)
+                            Toast.makeText(context, "Đang cập nhật blocklist...", Toast.LENGTH_SHORT).show()
+
+                            // Nếu bạn muốn “buộc VPN reload” sau khi update:
+                            // stopVpnService()
+                            // startVpnService()
+                        }
+                    )
+                } else {
+                    HomeScreen(
+                        isConnected = isRunning,
+                        blockedCount = blockedCount.toString(),
+                        onToggleClick = {
+                            if (isRunning) stopVpnService()
+                            else checkPermissionsAndStart()
+                        },
+                        onSettingsClick = {
+                            showSettings = true
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private fun checkPermissionsAndStart() {
+        // Bước 1: Kiểm tra quyền Hiển thị trên ứng dụng khác
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(
+                this,
+                "Vui lòng cấp quyền 'Hiển thị trên ứng dụng khác' để hiện cảnh báo chặn web",
+                Toast.LENGTH_LONG
+            ).show()
+
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+            return
+        }
+
+        // Bước 2: Chuẩn bị VPN
+        prepareAndStartVpn()
+    }
+
+    private fun prepareAndStartVpn() {
+        val intent = VpnService.prepare(this)
+        if (intent != null) vpnPermissionLauncher.launch(intent)
+        else startVpnService()
+    }
+
+    private fun startVpnService() {
+        val intent = Intent(this, VShieldVpnService::class.java)
+        intent.action = VShieldVpnService.ACTION_START
+        startService(intent)
+    }
+
+    private fun stopVpnService() {
+        val intent = Intent(this, VShieldVpnService::class.java)
+        intent.action = VShieldVpnService.ACTION_STOP
+        startService(intent)
+    }
+}
+
+========================================
 FILE: ./app/src/main/java/com/trustnet/vshield/network/AiResultCache.kt
 ========================================
 
@@ -1982,269 +2110,6 @@ object AiResultCache {
         // Sau 10 phút, nếu người dùng vào lại web này, hệ thống sẽ quét lại để cập nhật tình trạng mới nhất.
         val expire = System.currentTimeMillis() + 600_000
         cache.put(domain, CacheItem(isBlocked, expire))
-    }
-}
-
-========================================
-FILE: ./app/src/main/java/com/trustnet/vshield/network/LocalScraper.kt
-========================================
-
-package com.trustnet.vshield.network
-
-import android.util.Log
-import com.trustnet.vshield.VShieldVpnService
-import com.trustnet.vshield.core.DomainBlacklist
-import org.json.JSONObject
-import org.jsoup.Jsoup
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.InetSocketAddress
-import java.net.Socket
-import java.net.URL
-import java.security.cert.X509Certificate
-import java.util.UUID
-import javax.net.ssl.SSLSocket
-import javax.net.ssl.SSLSocketFactory
-import kotlin.math.max
-
-object LocalScraper {
-    private const val TAG = "LocalScraper"
-
-    fun scrapeAndAnalyze(domain: String, service: VShieldVpnService): Boolean {
-        // Chốt chặn phụ: Tránh quét lại hệ thống
-        if (domain.endsWith(".arpa")) return false
-
-        var rawSocket: Socket? = null
-        var sslSocket: SSLSocket? = null
-
-        try {
-            // 1. Phân giải IP bằng DoH (Dùng IP cứng 1.1.1.1 để bypass VPN loop)
-            val realIp = resolveIpViaDoH(domain)
-            if (realIp == null) {
-                Log.e(TAG, "Không thể phân giải IP qua DoH cho $domain")
-                return false
-            }
-
-            // 2. Tạo Socket thô và BẢO VỆ NÓ (Đi xuyên qua VPN)
-            rawSocket = Socket()
-            rawSocket.bind(null) // Lệnh Bắt buộc: Ép Android cấp phát File Descriptor trước khi protect
-
-            if (!service.protect(rawSocket)) {
-                Log.e(TAG, "Không thể protect socket cho $domain")
-                return false
-            }
-
-            // Kết nối trực tiếp tới IP thật của domain
-            rawSocket.connect(InetSocketAddress(realIp, 443), 1500)
-
-            // 3. Nâng cấp lên SSL Socket (Bắt tay TLS hỗ trợ SNI)
-            val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
-            sslSocket = sslFactory.createSocket(rawSocket, domain, 443, true) as SSLSocket
-            sslSocket.soTimeout = 1500
-            sslSocket.startHandshake()
-
-            // 4. Lấy thông tin chứng chỉ SSL (Giúp Server bắt Phishing siêu nhanh)
-            val certs = sslSocket.session.peerCertificates
-            val x509 = certs.firstOrNull() as? X509Certificate
-
-            val issuer = x509?.issuerX500Principal?.name ?: "Unknown"
-            val validFrom = x509?.notBefore?.time ?: 0L
-            val validTo = x509?.notAfter?.time ?: 0L
-            val now = System.currentTimeMillis()
-
-            val createdDaysAgo = max(0, (now - validFrom) / (1000 * 60 * 60 * 24)).toInt()
-            val expiresInDays = max(0, (validTo - now) / (1000 * 60 * 60 * 24)).toInt()
-
-            // 5. Gửi HTTP GET để tải HTML (Giả dạng Google Chrome)
-            val writer = OutputStreamWriter(sslSocket.outputStream)
-            writer.write("GET / HTTP/1.1\r\n")
-            writer.write("Host: $domain\r\n")
-            writer.write("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0\r\n")
-            writer.write("Connection: close\r\n\r\n")
-            writer.flush()
-
-            // 6. Đọc phản hồi và KIỂM TRA CONTENT-TYPE (Tránh cào file APK, Ảnh, Video)
-            val reader = BufferedReader(InputStreamReader(sslSocket.inputStream))
-            val htmlBuilder = StringBuilder()
-            var line: String?
-            var bytesRead = 0
-
-            var isHtml = false
-            var contentType = "unknown"
-
-            // Đọc dòng Status HTTP
-            val statusLine = reader.readLine()
-            if (statusLine != null) htmlBuilder.append(statusLine).append("\n")
-
-            // Đọc Header để tìm xem nó có phải trang Web (text/html) không
-            while (reader.readLine().also { line = it } != null) {
-                if (line!!.isEmpty()) break // Hết Header
-
-                val lowerLine = line!!.lowercase()
-                if (lowerLine.startsWith("content-type:")) {
-                    contentType = lowerLine.substringAfter("content-type:").trim()
-                    if (contentType.contains("text/html")) {
-                        isHtml = true
-                    }
-                }
-            }
-
-            // Nếu là trang web thực sự -> Tiến hành cào nội dung
-            if (isHtml) {
-                while (reader.readLine().also { line = it } != null) {
-                    htmlBuilder.append(line).append("\n")
-                    bytesRead += line?.length ?: 0
-                    // Cắt ngang nếu lấy đủ thẻ Meta để tăng tốc độ phân tích
-                    if (bytesRead > 15000 || htmlBuilder.contains("</head>")) break
-                }
-            } else {
-                // Đóng mộc báo hiệu cho Server biết đây là file/API tải ngầm
-                Log.d(TAG, "Lọc nhanh: $domain trả về [$contentType]. Gửi siêu dữ liệu lên Server.")
-                htmlBuilder.append("[NON-HTML: $contentType]")
-            }
-
-            // 7. Dùng Jsoup bóc tách thẻ HTML
-            val document = Jsoup.parse(htmlBuilder.toString())
-            val title = if (isHtml) document.title() else ""
-            val description = if (isHtml) document.select("meta[name=description]").attr("content") else ""
-            val keywords = if (isHtml) document.select("meta[name=keywords]").attr("content") else ""
-            val bodySnippet = if (isHtml) document.body()?.text()?.take(500) ?: "" else htmlBuilder.toString()
-
-            // 8. ĐÓNG GÓI JSON GỬI LÊN SERVER
-            val payload = JSONObject().apply {
-                put("request_id", "req-${UUID.randomUUID().toString().substring(0, 8)}")
-                put("domain", domain)
-
-                // Trích xuất tùy chọn chặn của người dùng gửi cho Server AI
-                put("user_preferences", JSONObject().apply {
-                    put("block_phishing", true) // Phishing mặc định luôn bị khóa
-                    put("block_adult", DomainBlacklist.blockAdult)
-                    put("block_gambling", DomainBlacklist.blockGambling)
-                })
-
-                put("client_metadata", JSONObject().apply {
-                    put("timestamp", System.currentTimeMillis() / 1000)
-                    put("user_agent", "V-Shield Android Local Scraper")
-                })
-                put("content", JSONObject().apply {
-                    put("title", title)
-                    put("description", description)
-                    put("meta_keywords", keywords)
-                    put("body_snippet", bodySnippet)
-                })
-                put("security_signals", JSONObject().apply {
-                    put("has_ssl_from_client", true)
-                    put("server_verified_ssl", JSONObject().apply {
-                        put("is_valid", true)
-                        put("issuer", issuer)
-                        put("created_days_ago", createdDaysAgo)
-                        put("expires_in_days", expiresInDays)
-                    })
-                })
-            }
-
-            Log.d(TAG, "Đã có dữ liệu cho $domain, gửi API lên Server...")
-
-            // Gọi API
-            return ServerApiClient.sendPayloadToAi(payload)
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Lỗi LocalScraper cho $domain: ${e.message}")
-            return false // Fail-open (Lỗi mạng thì cho qua)
-        } finally {
-            try { sslSocket?.close() } catch (_: Exception) {}
-            try { rawSocket?.close() } catch (_: Exception) {}
-        }
-    }
-
-    private fun resolveIpViaDoH(domain: String): String? {
-        var connection: HttpURLConnection? = null
-        try {
-            val url = URL("https://1.1.1.1/dns-query?name=$domain&type=A")
-            connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = 2000
-            connection.readTimeout = 2000
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("accept", "application/dns-json")
-
-            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                val responseStr = connection.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(responseStr)
-
-                if (json.optInt("Status") == 0 && json.has("Answer")) {
-                    val answers = json.getJSONArray("Answer")
-                    for (i in 0 until answers.length()) {
-                        val record = answers.getJSONObject(i)
-                        // Chỉ lấy IPv4 (type = 1)
-                        if (record.optInt("type") == 1) {
-                            return record.optString("data")
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Lỗi phân giải DoH cho $domain: ${e.message}")
-        } finally {
-            connection?.disconnect()
-        }
-        return null
-    }
-}
-
-========================================
-FILE: ./app/src/main/java/com/trustnet/vshield/network/ServerApiClient.kt
-========================================
-
-package com.trustnet.vshield.network
-
-import android.util.Log
-import org.json.JSONObject
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
-
-object ServerApiClient {
-    private const val TAG = "ServerApiClient"
-    // IP Server FastAPI của bạn
-    private const val SERVER_URL = "http://YOUR_SERVER_IP:8000/v1/analyze"
-
-    fun sendPayloadToAi(payload: JSONObject): Boolean {
-        var connection: HttpURLConnection? = null
-        try {
-            val url = URL(SERVER_URL)
-            connection = url.openConnection() as HttpURLConnection
-
-            // Timeout chờ AI phân tích (1 giây)
-            connection.connectTimeout = 500
-            connection.readTimeout = 1000
-
-            connection.requestMethod = "POST"
-            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-            connection.doOutput = true
-
-            // THÊM DÒNG NÀY ĐỂ IN JSON RA MÀN HÌNH ANDROID STUDIO:
-            // Tham số '4' giúp format JSON thụt lề cho dễ đọc
-            Log.d(TAG, "🚀 Chuẩn bị gửi Payload lên Server:\n${payload.toString(4)}")
-
-            // Gửi toàn bộ cục payload to béo lên Server
-            OutputStreamWriter(connection.outputStream, "UTF-8").use { writer ->
-                writer.write(payload.toString())
-                writer.flush()
-            }
-
-            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                val responseStr = connection.inputStream.bufferedReader().use { it.readText() }
-                val responseJson = JSONObject(responseStr)
-                return responseJson.optString("action", "allow") == "block"
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Lỗi gọi API AI: ${e.message}")
-        } finally {
-            connection?.disconnect()
-        }
-        return false
     }
 }
 
@@ -2313,6 +2178,348 @@ object FilterSyncManager {
         } finally {
             connection?.disconnect()
         }
+    }
+}
+
+========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/network/LocalScraper.kt
+========================================
+
+package com.trustnet.vshield.network
+
+import android.util.Log
+import com.trustnet.vshield.VShieldVpnService
+import okhttp3.Request
+import org.json.JSONObject
+import java.security.cert.X509Certificate
+import java.util.Locale
+import kotlin.math.ln
+import kotlin.math.max
+
+object LocalScraper {
+    private const val TAG = "LocalScraper"
+    private const val MAX_HTML_SIZE = 50_000 // Tối đa 50KB để đảm bảo tốc độ
+
+    // BIÊN DỊCH SẴN REGEX VÀO RAM
+    private val passwordRegex = Regex("""type=["']password["']""", RegexOption.IGNORE_CASE)
+    private val iframeRegex = Regex("""<iframe""", RegexOption.IGNORE_CASE)
+    private val externalScriptRegex = Regex("""<script[^>]+src=["'](http|//)[^"']*["']""", RegexOption.IGNORE_CASE)
+    private val hiddenElementRegex = Regex("""type=["']hidden["']|display:\s*none|visibility:\s*hidden""", RegexOption.IGNORE_CASE)
+    private val linkRegex = Regex("""<a[^>]+href=["'](.*?)["']""", RegexOption.IGNORE_CASE)
+    private val faviconRegex = Regex("""rel=["'](shortcut )?icon["']""", RegexOption.IGNORE_CASE)
+    private val titleRegex = Regex("""<title>(.*?)</title>""", RegexOption.IGNORE_CASE)
+    private val metaDescRegex = Regex("""<meta[^>]+name=["']description["'][^>]+content=["'](.*?)["']""", RegexOption.IGNORE_CASE)
+
+    // Heuristic Word Count Regexes
+    private val gamblingRegex = Regex("""nổ hũ|tài xỉu|bet|casino|đánh bài|rút tiền|game bài|slot""", RegexOption.IGNORE_CASE)
+    private val adultRegex = Regex("""18\+|khiêu dâm|người lớn|sex|porn|jav""", RegexOption.IGNORE_CASE)
+    private val phishingRegex = Regex("""đăng nhập|login|mật khẩu|password|xác minh|verify|tài khoản|account|bảo mật|cập nhật|update""", RegexOption.IGNORE_CASE)
+    private val cryptoRegex = Regex("""bitcoin|crypto|wallet|token|usdt|binance|airdrop""", RegexOption.IGNORE_CASE)
+
+    private val brands = listOf("facebook", "google", "apple", "paypal", "microsoft", "amazon", "netflix", "shopee", "tiktok", "zalo", "bank")
+
+    fun scrapeAndAnalyze(domain: String, service: VShieldVpnService): Boolean {
+        if (domain.endsWith(".arpa")) return false
+        val startTime = System.currentTimeMillis()
+
+        // 1. TÍNH TOÁN URL SIGNALS
+        val isIpBased = domain.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$"""))
+        val parts = domain.split(".")
+        val tld = if (parts.size > 1 && !isIpBased) parts.last() else ""
+        val subdomainCount = max(0, parts.size - 2)
+        val specialCharsRatio = domain.count { !it.isLetterOrDigit() && it != '.' }.toDouble() / domain.length
+        val containsBrand = brands.any { domain.contains(it) } && !brands.contains(parts.getOrNull(parts.size - 2))
+        val entropy = calculateEntropy(domain)
+
+        // 2. GỬI REQUEST BẰNG OKHTTP
+        val client = VpnHttpClient.getClient(service)
+        val request = Request.Builder()
+            .url("https://$domain")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36")
+            .build()
+
+        try {
+            client.newCall(request).execute().use { response ->
+                val responseTime = System.currentTimeMillis() - startTime
+                val realIp = "" // Bỏ qua việc lấy IP thủ công vì OkHttp quản lý trong Pool
+                val statusCode = response.code
+                val isRedirect = response.isRedirect
+                val serverHeader = response.header("Server") ?: ""
+                val xFramePresent = response.header("X-Frame-Options") != null
+
+                // 3. BÓC TÁCH BẢO MẬT SSL
+                val handshake = response.handshake
+                val x509 = handshake?.peerCertificates?.firstOrNull() as? X509Certificate
+                val issuer = x509?.issuerX500Principal?.name ?: "Unknown"
+                val validFrom = x509?.notBefore?.time ?: 0L
+                val validTo = x509?.notAfter?.time ?: 0L
+                val now = System.currentTimeMillis()
+
+                val createdDaysAgo = max(0, (now - validFrom) / (1000 * 60 * 60 * 24)).toInt()
+                val expiresInDays = max(0, (validTo - now) / (1000 * 60 * 60 * 24)).toInt()
+                val isFreeSsl = issuer.contains("Let's Encrypt", true) ||
+                        issuer.contains("ZeroSSL", true) ||
+                        issuer.contains("Cloudflare", true)
+
+                // 4. STREAM TỐI ĐA 50KB HTML
+                val bodyStream = response.body?.byteStream() ?: return false
+                val buffer = ByteArray(4096)
+                var bytesRead = 0
+                val bodyBuilder = java.lang.StringBuilder()
+
+                while (bytesRead < MAX_HTML_SIZE) {
+                    val read = bodyStream.read(buffer)
+                    if (read == -1) break
+                    bodyBuilder.append(String(buffer, 0, read, Charsets.UTF_8))
+                    bytesRead += read
+                }
+
+                // Đóng mạng lập tức để giải phóng Connection Pool
+                response.close()
+
+                val bodySnippet = bodyBuilder.toString()
+
+                // 5. CHẠY REGEX TRÊN ĐOẠN 50KB
+                val title = titleRegex.find(bodySnippet)?.groupValues?.get(1) ?: ""
+                val description = metaDescRegex.find(bodySnippet)?.groupValues?.get(1) ?: ""
+                val hasFavicon = faviconRegex.containsMatchIn(bodySnippet)
+
+                val links = linkRegex.findAll(bodySnippet).map { it.groupValues[1] }.toList()
+                val totalLinks = links.size
+                val emptyHrefCount = links.count { it == "#" || it.isBlank() || it.startsWith("javascript:") }
+                val externalLinks = links.count { it.startsWith("http") && !it.contains(domain) }
+                val externalLinksRatio = if (totalLinks > 0) externalLinks.toDouble() / totalLinks else 0.0
+
+                // 6. GÓI DỮ LIỆU JSON
+                val payload = JSONObject().apply {
+                    put("target_info", JSONObject().apply {
+                        put("requested_url", "https://$domain")
+                        put("resolved_ip", realIp)
+                    })
+
+                    put("url_signals", JSONObject().apply {
+                        put("tld", tld)
+                        put("domain_length", domain.length)
+                        put("subdomain_count", subdomainCount)
+                        put("is_ip_based_url", isIpBased)
+                        put("special_chars_ratio", String.format(Locale.US, "%.2f", specialCharsRatio).toDouble())
+                        put("contains_brand_names", containsBrand)
+                        put("entropy_score", String.format(Locale.US, "%.2f", entropy).toDouble())
+                    })
+
+                    put("network_signals", JSONObject().apply {
+                        put("http_status_code", statusCode)
+                        put("redirect_chain_length", if (isRedirect) 1 else 0)
+                        put("response_time_ms", responseTime)
+                        put("server_header", serverHeader)
+                        put("x_frame_options_present", xFramePresent)
+                    })
+
+                    put("security_signals", JSONObject().apply {
+                        put("has_ssl_from_client", true)
+                        put("server_verified_ssl", JSONObject().apply {
+                            put("is_valid", true)
+                            put("issuer", issuer)
+                            put("created_days_ago", createdDaysAgo)
+                            put("expires_in_days", expiresInDays)
+                            put("is_free_ssl", isFreeSsl)
+                        })
+                    })
+
+                    put("content_signals", JSONObject().apply {
+                        put("metadata", JSONObject().apply {
+                            put("title", title.take(100))
+                            put("description", description.take(200))
+                            put("has_favicon", hasFavicon)
+                        })
+
+                        put("dom_structure_signals", JSONObject().apply {
+                            put("password_input_count", passwordRegex.findAll(bodySnippet).count())
+                            put("iframe_count", iframeRegex.findAll(bodySnippet).count())
+                            put("external_script_count", externalScriptRegex.findAll(bodySnippet).count())
+                            put("hidden_elements_count", hiddenElementRegex.findAll(bodySnippet).count())
+                            put("total_links", totalLinks)
+                            put("external_links_ratio", String.format(Locale.US, "%.2f", externalLinksRatio).toDouble())
+                            put("empty_href_count", emptyHrefCount)
+                        })
+
+                        put("heuristic_word_counts", JSONObject().apply {
+                            put("gambling_score", gamblingRegex.findAll(bodySnippet).count())
+                            put("adult_score", adultRegex.findAll(bodySnippet).count())
+                            put("phishing_score", phishingRegex.findAll(bodySnippet).count())
+                            put("crypto_score", cryptoRegex.findAll(bodySnippet).count())
+                        })
+
+                        val cleanBody = bodySnippet.replace(Regex("<[^>]*>"), " ").replace(Regex("\\s+"), " ").trim()
+                        put("body_snippet", cleanBody.take(500) + if (cleanBody.length > 500) "..." else "")
+                    })
+                }
+
+                Log.d(TAG, "⚡ Scrape OK: $domain tốn ${System.currentTimeMillis() - startTime}ms")
+                return ServerApiClient.sendPayloadToAi(payload)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Lỗi OkHttp Scraper cho $domain: ${e.message}")
+            return false
+        }
+    }
+
+    private fun calculateEntropy(s: String): Double {
+        if (s.isEmpty()) return 0.0
+        val freq = HashMap<Char, Int>()
+        for (c in s) freq[c] = freq.getOrDefault(c, 0) + 1
+        var entropy = 0.0
+        for (count in freq.values) {
+            val p = count.toDouble() / s.length
+            entropy -= p * (ln(p) / ln(2.0))
+        }
+        return entropy
+    }
+}
+
+========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/network/ServerApiClient.kt
+========================================
+
+package com.trustnet.vshield.network
+
+import android.util.Log
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+
+object ServerApiClient {
+    private const val TAG = "ServerApiClient"
+    // IP Server FastAPI của bạn
+    private const val SERVER_URL = "http://YOUR_SERVER_IP:8000/v1/analyze"
+
+    fun sendPayloadToAi(payload: JSONObject): Boolean {
+        var connection: HttpURLConnection? = null
+        try {
+            val url = URL(SERVER_URL)
+            connection = url.openConnection() as HttpURLConnection
+
+            // Timeout chờ AI phân tích (1 giây)
+            connection.connectTimeout = 500
+            connection.readTimeout = 1000
+
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            connection.doOutput = true
+
+            // THÊM DÒNG NÀY ĐỂ IN JSON RA MÀN HÌNH ANDROID STUDIO:
+            // Tham số '4' giúp format JSON thụt lề cho dễ đọc
+            Log.d(TAG, "🚀 Chuẩn bị gửi Payload lên Server:\n${payload.toString(4)}")
+
+            // Gửi toàn bộ cục payload to béo lên Server
+            OutputStreamWriter(connection.outputStream, "UTF-8").use { writer ->
+                writer.write(payload.toString())
+                writer.flush()
+            }
+
+            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
+                val responseStr = connection.inputStream.bufferedReader().use { it.readText() }
+                val responseJson = JSONObject(responseStr)
+                return responseJson.optString("action", "allow") == "block"
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Lỗi gọi API AI: ${e.message}")
+        } finally {
+            connection?.disconnect()
+        }
+        return false
+    }
+}
+
+========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/network/VpnHttpClient.kt
+========================================
+
+package com.trustnet.vshield.network
+
+import android.net.VpnService
+import okhttp3.Dns
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.net.InetAddress
+import java.net.Socket
+import java.util.concurrent.TimeUnit
+import javax.net.SocketFactory
+
+object VpnHttpClient {
+    @Volatile
+    private var instance: OkHttpClient? = null
+
+    // Đảm bảo chỉ có 1 instance duy nhất để tận dụng Connection Pool
+    fun getClient(vpnService: VpnService): OkHttpClient {
+        return instance ?: synchronized(this) {
+            instance ?: buildClient(vpnService).also { instance = it }
+        }
+    }
+
+    private fun buildClient(vpnService: VpnService): OkHttpClient {
+        // 1. CHÌA KHÓA: Ép tất cả Socket tạo ra phải đi xuyên qua VPN (Protect)
+        val protectedSocketFactory = object : SocketFactory() {
+            val defaultFactory = getDefault()
+            override fun createSocket(): Socket {
+                val socket = defaultFactory.createSocket()
+                vpnService.protect(socket)
+                return socket
+            }
+            override fun createSocket(host: String?, port: Int): Socket = createSocket()
+            override fun createSocket(host: String?, port: Int, localHost: InetAddress?, localPort: Int): Socket = createSocket()
+            override fun createSocket(host: InetAddress?, port: Int): Socket = createSocket()
+            override fun createSocket(address: InetAddress?, port: Int, localAddress: InetAddress?, localPort: Int): Socket = createSocket()
+        }
+
+        // 2. Client phụ chỉ dùng cho việc gọi DoH (1.1.1.1)
+        val dohClient = OkHttpClient.Builder()
+            .socketFactory(protectedSocketFactory)
+            .connectTimeout(1, TimeUnit.SECONDS)
+            .readTimeout(1, TimeUnit.SECONDS)
+            .build()
+
+        // 3. Ghi đè bộ giải mã DNS của OkHttp, bắt nó dùng DoH Cloudflare
+        val dohDns = object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                val request = Request.Builder()
+                    .url("https://1.1.1.1/dns-query?name=$hostname&type=A")
+                    .header("accept", "application/dns-json")
+                    .build()
+
+                try {
+                    dohClient.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val body = response.body?.string() ?: return emptyList()
+                            val json = JSONObject(body)
+                            if (json.optInt("Status") == 0 && json.has("Answer")) {
+                                val answers = json.getJSONArray("Answer")
+                                for (i in 0 until answers.length()) {
+                                    val record = answers.getJSONObject(i)
+                                    if (record.optInt("type") == 1) { // A Record (IPv4)
+                                        return listOf(InetAddress.getByName(record.optString("data")))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Lỗi mạng thì fallback về DNS hệ thống
+                }
+                return Dns.SYSTEM.lookup(hostname)
+            }
+        }
+
+        // 4. Client chính để Scrape dữ liệu
+        return OkHttpClient.Builder()
+            .socketFactory(protectedSocketFactory)
+            .dns(dohDns) // Tích hợp DoH siêu tốc
+            .connectTimeout(2, TimeUnit.SECONDS)
+            .readTimeout(2, TimeUnit.SECONDS) // Ép timeout sớm nếu server chết
+            .followRedirects(false) // Không chạy theo Redirect để tối ưu thời gian
+            .build()
     }
 }
 
@@ -2798,6 +3005,7 @@ android {
 }
 
 dependencies {
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jsoup:jsoup:1.17.2")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

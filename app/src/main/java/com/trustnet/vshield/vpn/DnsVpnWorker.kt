@@ -123,39 +123,55 @@ class DnsVpnWorker(
         }
         // --- 2. CHỐT CHẶN 2: TÊN MIỀN TRẮNG (An toàn tuyệt đối) ---
         else if (qDomain.endsWith(".arpa") || DomainBlacklist.isWhitelisted(qDomain)) {
-            // Không log để tránh spam rác logcat, đi thẳng ra mạng luôn!
             responsePayload = forwardToUpstream(dnsPayload)
         }
-        // --- 3. ĐƯA LÊN TRINH SÁT & AI PHÂN TÍCH ---
+        // --- 3. ĐƯA LÊN TRINH SÁT & AI PHÂN TÍCH (ASYNCHRONOUS ZERO-LATENCY) ---
         else {
-            var isBlockedByAi = AiResultCache.get(qDomain)
-
-            if (isBlockedByAi == null) {
-                // Đánh dấu đang xử lý, rớt luôn các truy vấn trùng lặp (DNS Retry)
-                if (inProgressDomains.putIfAbsent(qDomain, true) != null) return
-
-                try {
-                    // Chờ qua trạm thu phí (chỉ cho 4 luồng chạy Jsoup cùng lúc)
-                    aiScraperSemaphore.withPermit {
-                        isBlockedByAi = LocalScraper.scrapeAndAnalyze(qDomain, service)
-                        AiResultCache.put(qDomain, isBlockedByAi!!)
-                    }
-                } finally {
-                    // Xong việc thì xóa khỏi danh sách in-progress
-                    inProgressDomains.remove(qDomain)
-                }
-            }
+            val isBlockedByAi = AiResultCache.get(qDomain)
 
             if (isBlockedByAi == true) {
+                // Đã có kết quả AI từ trước và là web xấu -> Chặn ngay lập tức
                 val count = blocked.incrementAndGet()
                 VpnStats.blockedCount.postValue(count)
                 VpnStats.lastBlockedDomain.postValue(qDomain)
 
                 mainHandler.post { service.openBlockingScreen(qDomain) }
                 responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
-                Log.d("VShield", "BLOCKED BY AI: $qDomain")
-            } else {
+                Log.d("VShield", "BLOCKED BY AI (Cache hit): $qDomain")
+            }
+            else if (isBlockedByAi == false) {
+                // Đã có kết quả AI là web sạch -> Cho qua luôn
                 responsePayload = forwardToUpstream(dnsPayload)
+            }
+            else {
+                // CHƯA CÓ KẾT QUẢ (Domain mới) -> THẢ TRƯỚC, CHẶN SAU
+
+                // 1. CHOP PHÉP TRÌNH DUYỆT ĐI TIẾP NGAY LẬP TỨC
+                responsePayload = forwardToUpstream(dnsPayload)
+
+                // 2. KÍCH HOẠT SCRAPER CHẠY NGẦM (Fire and Forget)
+                if (inProgressDomains.putIfAbsent(qDomain, true) == null) {
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            // Chờ qua trạm thu phí (chỉ cho tối đa 4 luồng Scrape chạy cùng lúc bảo vệ RAM)
+                            aiScraperSemaphore.withPermit {
+                                Log.d("VShield", "🔍 Đang trinh sát ngầm: $qDomain")
+                                val isBad = LocalScraper.scrapeAndAnalyze(qDomain, service)
+
+                                // Lưu kết quả vào Cache để đón lõng các request tiếp theo của chính domain này
+                                AiResultCache.put(qDomain, isBad)
+
+                                if (isBad) {
+                                    Log.w("VShield", "🚨 PHÁT HIỆN TRỄ (LATE BLOCK): $qDomain. Đã đưa vào Blacklist RAM!")
+                                    // Tùy chọn: Thêm rung điện thoại nhẹ hoặc Toast báo hiệu cho user ở đây
+                                }
+                            }
+                        } finally {
+                            // Xong việc thì xóa khỏi danh sách in-progress
+                            inProgressDomains.remove(qDomain)
+                        }
+                    }
+                }
             }
         }
 
