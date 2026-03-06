@@ -10,7 +10,7 @@ class SyncPreferences(context: Context) {
         get()      = prefs.getInt("blocklist_version", 0)
         set(value) = prefs.edit().putInt("blocklist_version", value).apply()
 
-    // ← MỚI: lưu version whitelist để delta sync
+    //Lưu version whitelist để delta sync
     var whitelistVersion: Int
         get()      = prefs.getInt("whitelist_version", 0)
         set(value) = prefs.edit().putInt("whitelist_version", value).apply()

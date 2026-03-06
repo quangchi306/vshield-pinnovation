@@ -35,13 +35,13 @@ class BlocklistSyncWorker(
 
     companion object {
 
-        /** Gọi trong VShieldApp.onCreate() */
+        /** Call VShieldApp.onCreate() */
         fun schedule(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            // Sync định kỳ mỗi 12h
+            // Sync mỗi 12h
             val periodicRequest = PeriodicWorkRequestBuilder<BlocklistSyncWorker>(12, TimeUnit.HOURS)
                 .setConstraints(constraints)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
@@ -53,7 +53,7 @@ class BlocklistSyncWorker(
                 periodicRequest,
             )
 
-            // Chạy ngay mỗi lần app khởi động
+            // Chạy mỗi lần app khởi động
             val immediateRequest = OneTimeWorkRequestBuilder<BlocklistSyncWorker>()
                 .setConstraints(constraints)
                 .build()

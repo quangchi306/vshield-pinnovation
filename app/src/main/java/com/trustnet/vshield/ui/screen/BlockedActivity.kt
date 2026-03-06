@@ -40,16 +40,15 @@ class BlockedActivity : ComponentActivity() {
                         openBrowser("https://www.google.com")
                     },
                     onBypass = {
-                        // --- LOGIC MỚI: TIẾP TỤC TRUY CẬP ---
+                        //TIẾP TỤC TRUY CẬP
 
-                        // 1. Gửi lệnh Whitelist (Cho phép 5 phút) về Service
+                        //Gửi lệnh Whitelist (Cho phép 5 phút) về Service
                         val intent = Intent(this, VShieldVpnService::class.java)
                         intent.action = VShieldVpnService.ACTION_ALLOW_DOMAIN
                         intent.putExtra(VShieldVpnService.EXTRA_DOMAIN, domain)
                         startService(intent)
 
-                        // 2. Mở trình duyệt và quay lại trang web đó
-                        // Lưu ý: DNS chỉ biết domain, không biết path, nên ta về trang chủ https
+                        //Mở trình duyệt và quay lại trang web đó
                         val targetUrl = "https://$domain"
                         openBrowser(targetUrl)
                     }
@@ -65,7 +64,7 @@ class BlockedActivity : ComponentActivity() {
             browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(browserIntent)
 
-            // Đóng màn hình cảnh báo ngay lập tức
+            // Đóng màn hình cảnh báo
             finishAndRemoveTask()
         } catch (e: Exception) {
             Toast.makeText(this, "Không tìm thấy trình duyệt web!", Toast.LENGTH_SHORT).show()
@@ -79,7 +78,7 @@ fun BlockedScreen(domain: String, onGoBack: () -> Unit, onBypass: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFB00020)) // Nền đỏ cảnh báo
+            .background(Color(0xFFB00020))
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -112,7 +111,7 @@ fun BlockedScreen(domain: String, onGoBack: () -> Unit, onBypass: () -> Unit) {
 
         Text(
             text = domain,
-            style = MaterialTheme.typography.headlineSmall, // Font to hơn cho domain
+            style = MaterialTheme.typography.headlineSmall,
             color = Color.Yellow,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
@@ -123,7 +122,7 @@ fun BlockedScreen(domain: String, onGoBack: () -> Unit, onBypass: () -> Unit) {
         )
 
         Text(
-            text = "Trang web này có thể chứa nội dung lừa đảo, cờ bạc hoặc phần mềm độc hại.",
+            text = "Trang web này có thể chứa nội dung lừa đảo, cờ bạc, 18+.",
             style = MaterialTheme.typography.bodyMedium,
             color = Color.White.copy(alpha = 0.8f),
             textAlign = TextAlign.Center
@@ -131,7 +130,7 @@ fun BlockedScreen(domain: String, onGoBack: () -> Unit, onBypass: () -> Unit) {
 
         Spacer(modifier = Modifier.height(48.dp))
 
-        // Nút Quay lại (Google)
+        //Button Quay lại Google.com
         Button(
             onClick = onGoBack,
             colors = ButtonDefaults.buttonColors(containerColor = Color.White),

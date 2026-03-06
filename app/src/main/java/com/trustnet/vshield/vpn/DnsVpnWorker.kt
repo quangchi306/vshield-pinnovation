@@ -43,7 +43,7 @@ class DnsVpnWorker(
 
     fun start() {
         job = scope.launch {
-            val buffer = ByteArray(32767) // Buffer đủ lớn cho gói tin IP
+            val buffer = ByteArray(32767)
             while (isActive && service.isRunning()) {
                 try {
                     // Đọc gói tin từ hệ điều hành gửi xuống
@@ -70,7 +70,6 @@ class DnsVpnWorker(
         // Parse header IP/UDP
         val udpPacket = UdpIpv4Packet.parse(packetData) ?: return
 
-        // Chỉ xử lý traffic DNS (Port 53) gửi đến IP ảo của VPN
         if (udpPacket.dstPort != 53 || udpPacket.dstIp != VShieldVpnService.VPN_DNS_IP_INT) {
             return
         }
@@ -79,33 +78,46 @@ class DnsVpnWorker(
         val dnsPayload = udpPacket.payload
         val qDomain = DnsMessageParser.extractQueryDomain(dnsPayload) ?: return
 
-        // Cập nhật thống kê domain đang truy cập
         VpnStats.lastQueryDomain.postValue(qDomain)
 
         val responsePayload: ByteArray?
 
-        // --- LOGIC CHẶN ---
-        if (DomainBlacklist.isBlocked(qDomain)) {
-            // 1. Tăng bộ đếm thống kê
-            val count = blocked.incrementAndGet()
-            VpnStats.blockedCount.postValue(count)
-            VpnStats.lastBlockedDomain.postValue(qDomain)
+        //LOGIC CHẶN / CẢNH BÁO THEO CATEGORY
+        when (DomainBlacklist.getBlockCategory(qDomain)) {
+            // 1) PHISHING: Trả NXDOMAIN
+            DomainBlacklist.BlockCategory.PHISHING -> {
+                val count = blocked.incrementAndGet()
+                VpnStats.blockedCount.postValue(count)
+                VpnStats.lastBlockedDomain.postValue(qDomain)
 
-            // 2. Gửi lệnh mở màn hình cảnh báo (Chạy trên Main Thread)
-            // Đây là điểm thay đổi quan trọng để hiện màn hình đỏ thay vì chỉ thông báo
-            mainHandler.post {
-                service.openBlockingScreen(qDomain)
+                responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
+                Log.d("VShield", "BLOCKED [PHISHING]: $qDomain")
             }
 
-            // 3. Trả về NXDOMAIN (Tên miền không tồn tại) để trình duyệt dừng tải ngay lập tức
-            responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
-            Log.d("VShield", "BLOCKED: $qDomain")
-        } else {
-            // Cho phép: Gửi query đi ra Internet (Cloudflare/Google DNS)
-            responsePayload = forwardToUpstream(dnsPayload)
+            //ADULT/GAMBLING
+            DomainBlacklist.BlockCategory.ADULT,
+            DomainBlacklist.BlockCategory.GAMBLING -> {
+                val count = blocked.incrementAndGet()
+                VpnStats.blockedCount.postValue(count)
+                VpnStats.lastBlockedDomain.postValue(qDomain)
+
+                //Main Thread
+                mainHandler.post {
+                    service.openBlockingScreen(qDomain)
+                }
+
+                //
+                responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
+                Log.d("VShield", "WARN/BLOCKED [CONTENT]: $qDomain")
+            }
+
+            //NONE: Cho phép
+            DomainBlacklist.BlockCategory.NONE -> {
+                responsePayload = forwardToUpstream(dnsPayload)
+            }
         }
 
-        // Ghi phản hồi vào Interface để trả về cho ứng dụng
+        // Ghi phản hồi vào Interface
         if (responsePayload != null && responsePayload.isNotEmpty()) {
             val ipResponse = PacketBuilder.buildUdpIpv4Packet(
                 srcIp = udpPacket.dstIp,   // Đảo ngược nguồn/đích
@@ -122,13 +134,11 @@ class DnsVpnWorker(
         }
     }
 
-    // Hàm gửi DNS query ra mạng thật
+    // Hàm gửi DNS query ra internet
     private fun forwardToUpstream(dnsQuery: ByteArray): ByteArray? {
         var socket: DatagramSocket? = null
         return try {
             socket = DatagramSocket()
-            // QUAN TRỌNG: Bảo vệ socket để gói tin này đi thẳng ra Wifi/4G,
-            // không bị quay ngược lại vào VPN (tránh vòng lặp vô tận)
             if (!service.protect(socket)) return null
 
             socket.soTimeout = 2500 // Timeout 2.5 giây
@@ -142,7 +152,6 @@ class DnsVpnWorker(
             socket.receive(response)
             buf.copyOf(response.length)
         } catch (e: Exception) {
-            // Nếu lỗi mạng hoặc timeout, trả về null
             null
         } finally {
             socket?.close()

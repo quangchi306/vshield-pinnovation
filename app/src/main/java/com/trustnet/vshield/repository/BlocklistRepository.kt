@@ -30,10 +30,10 @@ class BlocklistRepository(private val context: Context) {
     private val syncPrefs    = SyncPreferences(context)
 
     /**
-     * Hàm chính — WorkManager gọi mỗi 12h.
-     * 1. Nếu chưa có data → Full sync (blocklist + whitelist)
-     * 2. Đã có data       → Delta sync
-     * 3. Sau sync         → Reload DomainBlacklist (BloomFilter + HashSet)
+     *WorkManager call 12h/1.
+     * 1. Chưa có data -> Full sync (blocklist + whitelist)
+     * 2. Đã có data -> data Delta sync
+     * 3. Sau sync -> Reload DomainBlacklist (BloomFilter + HashSet)
      */
     suspend fun sync(): SyncResult = withContext(Dispatchers.IO) {
         try {
@@ -80,7 +80,7 @@ class BlocklistRepository(private val context: Context) {
         return SyncResult.Success(added = body.total, removed = 0, version = body.currentVersion)
     }
 
-    // ── Delta sync ─────────────────────────────────────────────────────────
+    //Delta sync
     private suspend fun deltaSync(): SyncResult {
         val currentVersion   = syncPrefs.blocklistVersion
         val whitelistVersion = syncPrefs.whitelistVersion
@@ -109,7 +109,6 @@ class BlocklistRepository(private val context: Context) {
             Log.i(TAG, "Whitelist delta: +${body.whitelisted.size} domains")
         }
 
-        // Không có gì thay đổi
         if (body.totalAdded == 0 && body.totalRemoved == 0 && body.totalWhitelisted == 0) {
             syncPrefs.lastSyncTime = System.currentTimeMillis()
             return SyncResult.AlreadyUpToDate
@@ -126,7 +125,7 @@ class BlocklistRepository(private val context: Context) {
         )
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────
+    //Helpers
     suspend fun reportDomain(domain: String, category: String): Result<String> =
         withContext(Dispatchers.IO) {
             try {
