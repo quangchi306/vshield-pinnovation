@@ -10,17 +10,22 @@ data class RemoteDomain(
 )
 
 data class DeltaResponse(
-    @SerializedName("current_version") val currentVersion: Int,
-    @SerializedName("added")           val added:          List<RemoteDomain>,
-    @SerializedName("removed")         val removed:        List<String>,
-    @SerializedName("total_added")     val totalAdded:     Int,
-    @SerializedName("total_removed")   val totalRemoved:   Int,
+    @SerializedName("current_version")   val currentVersion:    Int,
+    @SerializedName("added")             val added:             List<RemoteDomain>,
+    @SerializedName("removed")           val removed:           List<String>,
+    @SerializedName("whitelisted")       val whitelisted:       List<String>,
+    @SerializedName("whitelist_version") val whitelistVersion:  Int,
+    @SerializedName("total_added")       val totalAdded:        Int,
+    @SerializedName("total_removed")     val totalRemoved:      Int,
+    @SerializedName("total_whitelisted") val totalWhitelisted:  Int,
 )
 
 data class FullSyncResponse(
-    @SerializedName("current_version") val currentVersion: Int,
-    @SerializedName("domains")         val domains:        List<RemoteDomain>,
-    @SerializedName("total")           val total:          Int,
+    @SerializedName("current_version")   val currentVersion:    Int,
+    @SerializedName("domains")           val domains:           List<RemoteDomain>,
+    @SerializedName("whitelisted")       val whitelisted:       List<String>,
+    @SerializedName("total")             val total:             Int,
+    @SerializedName("total_whitelisted") val totalWhitelisted:  Int,
 )
 
 data class StatsResponse(

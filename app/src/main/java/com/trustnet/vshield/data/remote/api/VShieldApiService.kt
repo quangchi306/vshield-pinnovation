@@ -9,6 +9,7 @@ interface VShieldApiService {
     @GET("api/v1/blocklist/delta")
     suspend fun getDelta(
         @Query("since")    since:    Int,
+        @Query("whitelist_since")  whitelistSince: Int = 0,
         @Query("category") category: String = "all",
         @Query("limit")    limit:    Int    = 5000,
     ): Response<DeltaResponse>

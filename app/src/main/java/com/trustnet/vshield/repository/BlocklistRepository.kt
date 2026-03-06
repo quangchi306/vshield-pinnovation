@@ -6,6 +6,7 @@ import com.trustnet.vshield.core.DomainBlacklist
 import com.trustnet.vshield.data.local.SyncPreferences
 import com.trustnet.vshield.data.local.VShieldDatabase
 import com.trustnet.vshield.data.local.entity.BlockedDomainEntity
+import com.trustnet.vshield.data.local.entity.WhitelistedDomainEntity
 import com.trustnet.vshield.data.remote.api.RetrofitClient
 import com.trustnet.vshield.data.remote.model.RemoteDomain
 import com.trustnet.vshield.data.remote.model.ReportRequest
@@ -22,15 +23,17 @@ sealed class SyncResult {
 
 class BlocklistRepository(private val context: Context) {
 
-    private val dao       = VShieldDatabase.getInstance(context).blocklistDao()
-    private val api       = RetrofitClient.api
-    private val syncPrefs = SyncPreferences(context)
+    private val db           = VShieldDatabase.getInstance(context)
+    private val dao          = db.blocklistDao()
+    private val whitelistDao = db.whitelistDao()
+    private val api          = RetrofitClient.api
+    private val syncPrefs    = SyncPreferences(context)
 
     /**
      * Hàm chính — WorkManager gọi mỗi 12h.
-     * 1. Nếu chưa có data → Full sync
-     * 2. Đã có data → Delta sync (chỉ lấy phần thay đổi)
-     * 3. Sau sync → Reload BloomFilter trong DomainBlacklist
+     * 1. Nếu chưa có data → Full sync (blocklist + whitelist)
+     * 2. Đã có data       → Delta sync
+     * 3. Sau sync         → Reload DomainBlacklist (BloomFilter + HashSet)
      */
     suspend fun sync(): SyncResult = withContext(Dispatchers.IO) {
         try {
@@ -45,6 +48,7 @@ class BlocklistRepository(private val context: Context) {
         }
     }
 
+    // ── Full sync ──────────────────────────────────────────────────────────
     private suspend fun fullSync(): SyncResult {
         Log.i(TAG, "Full Sync bắt đầu...")
         val response = api.getFullList()
@@ -54,39 +58,67 @@ class BlocklistRepository(private val context: Context) {
         val body = response.body()
             ?: return SyncResult.Error("Server trả về body rỗng")
 
+        // Lưu blocklist
         dao.deleteAll()
         dao.insertAll(body.domains.map { it.toEntity() })
-        syncPrefs.blocklistVersion = body.currentVersion
-        syncPrefs.lastSyncTime     = System.currentTimeMillis()
-        syncPrefs.needsFullSync    = false
 
-        Log.i(TAG, "Full Sync xong: ${body.total} domains, version ${body.currentVersion}")
+        // Lưu whitelist
+        if (body.whitelisted.isNotEmpty()) {
+            whitelistDao.deleteAll()
+            whitelistDao.insertAll(body.whitelisted.mapIndexed { i, domain ->
+                WhitelistedDomainEntity(domain = domain, version = i + 1)
+            })
+            Log.i(TAG, "Whitelist: ${body.whitelisted.size} domains")
+        }
+
+        syncPrefs.blocklistVersion  = body.currentVersion
+        syncPrefs.whitelistVersion  = body.totalWhitelisted
+        syncPrefs.lastSyncTime      = System.currentTimeMillis()
+        syncPrefs.needsFullSync     = false
+
+        Log.i(TAG, "Full Sync xong: ${body.total} blocklist + ${body.whitelisted.size} whitelist, version ${body.currentVersion}")
         return SyncResult.Success(added = body.total, removed = 0, version = body.currentVersion)
     }
 
+    // ── Delta sync ─────────────────────────────────────────────────────────
     private suspend fun deltaSync(): SyncResult {
-        val currentVersion = syncPrefs.blocklistVersion
-        Log.i(TAG, "Delta Sync từ version $currentVersion...")
+        val currentVersion   = syncPrefs.blocklistVersion
+        val whitelistVersion = syncPrefs.whitelistVersion
+        Log.i(TAG, "Delta Sync từ blocklist v$currentVersion, whitelist v$whitelistVersion...")
 
-        val response = api.getDelta(since = currentVersion)
+        val response = api.getDelta(
+            since           = currentVersion,
+            whitelistSince  = whitelistVersion,
+        )
         if (!response.isSuccessful)
             return SyncResult.Error("HTTP ${response.code()}: ${response.message()}")
 
         val body = response.body()
             ?: return SyncResult.Error("Server trả về body rỗng")
 
-        if (body.totalAdded == 0 && body.totalRemoved == 0) {
+        // Cập nhật blocklist
+        if (body.added.isNotEmpty())   dao.insertAll(body.added.map { it.toEntity() })
+        if (body.removed.isNotEmpty()) dao.deactivateDomains(body.removed)
+
+        // Cập nhật whitelist (chỉ append domain mới)
+        if (body.whitelisted.isNotEmpty()) {
+            whitelistDao.insertAll(body.whitelisted.map { domain ->
+                WhitelistedDomainEntity(domain = domain, version = body.whitelistVersion)
+            })
+            syncPrefs.whitelistVersion = body.whitelistVersion
+            Log.i(TAG, "Whitelist delta: +${body.whitelisted.size} domains")
+        }
+
+        // Không có gì thay đổi
+        if (body.totalAdded == 0 && body.totalRemoved == 0 && body.totalWhitelisted == 0) {
             syncPrefs.lastSyncTime = System.currentTimeMillis()
             return SyncResult.AlreadyUpToDate
         }
 
-        if (body.added.isNotEmpty())   dao.insertAll(body.added.map { it.toEntity() })
-        if (body.removed.isNotEmpty()) dao.deactivateDomains(body.removed)
-
         syncPrefs.blocklistVersion = body.currentVersion
         syncPrefs.lastSyncTime     = System.currentTimeMillis()
 
-        Log.i(TAG, "Delta Sync xong: +${body.totalAdded}/-${body.totalRemoved}, version ${body.currentVersion}")
+        Log.i(TAG, "Delta Sync xong: +${body.totalAdded}/-${body.totalRemoved} blocklist, +${body.totalWhitelisted} whitelist")
         return SyncResult.Success(
             added   = body.totalAdded,
             removed = body.totalRemoved,
@@ -94,6 +126,7 @@ class BlocklistRepository(private val context: Context) {
         )
     }
 
+    // ── Helpers ────────────────────────────────────────────────────────────
     suspend fun reportDomain(domain: String, category: String): Result<String> =
         withContext(Dispatchers.IO) {
             try {
@@ -107,9 +140,9 @@ class BlocklistRepository(private val context: Context) {
             }
         }
 
-    suspend fun getTotalCount()     = dao.countActive()
-    fun getLastSyncTime()           = syncPrefs.lastSyncTime
-    fun getCurrentVersion()         = syncPrefs.blocklistVersion
+    suspend fun getTotalCount() = dao.countActive()
+    fun getLastSyncTime()       = syncPrefs.lastSyncTime
+    fun getCurrentVersion()     = syncPrefs.blocklistVersion
 
     private fun RemoteDomain.toEntity() = BlockedDomainEntity(
         domain   = domain,

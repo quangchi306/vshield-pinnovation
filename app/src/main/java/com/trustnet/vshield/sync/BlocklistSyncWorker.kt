@@ -18,7 +18,7 @@ class BlocklistSyncWorker(
     override suspend fun doWork(): Result {
         Log.i(TAG, "WorkManager: bắt đầu sync...")
         return when (val result = BlocklistRepository(applicationContext).sync()) {
-            is SyncResult.Success      -> {
+            is SyncResult.Success -> {
                 Log.i(TAG, "Sync OK: +${result.added} domains, version ${result.version}")
                 Result.success()
             }
@@ -26,7 +26,7 @@ class BlocklistSyncWorker(
                 Log.i(TAG, "Đã up-to-date.")
                 Result.success()
             }
-            is SyncResult.Error        -> {
+            is SyncResult.Error -> {
                 Log.w(TAG, "Sync lỗi: ${result.message}")
                 if (runAttemptCount < 3) Result.retry() else Result.failure()
             }
@@ -34,22 +34,37 @@ class BlocklistSyncWorker(
     }
 
     companion object {
-        /** Gọi trong VShieldApp.onCreate() — đăng ký sync mỗi 12h */
+
+        /** Gọi trong VShieldApp.onCreate() */
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<BlocklistSyncWorker>(12, TimeUnit.HOURS)
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build()
-                )
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+
+            // Sync định kỳ mỗi 12h
+            val periodicRequest = PeriodicWorkRequestBuilder<BlocklistSyncWorker>(12, TimeUnit.HOURS)
+                .setConstraints(constraints)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
                 .build()
 
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 WORK_NAME,
                 ExistingPeriodicWorkPolicy.KEEP,
-                request,
+                periodicRequest,
             )
+
+            // Chạy ngay mỗi lần app khởi động
+            val immediateRequest = OneTimeWorkRequestBuilder<BlocklistSyncWorker>()
+                .setConstraints(constraints)
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "${WORK_NAME}_initial",
+                ExistingWorkPolicy.REPLACE,
+                immediateRequest,
+            )
+
+            Log.i(TAG, "Sync lần đầu được kích hoạt ngay")
             Log.i(TAG, "Sync định kỳ đăng ký")
         }
 
