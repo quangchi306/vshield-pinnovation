@@ -28,6 +28,10 @@ import androidx.compose.ui.unit.dp
 import com.trustnet.vshield.VShieldVpnService
 import com.trustnet.vshield.core.DomainBlacklist
 
+// Patch 1: import thêm
+import com.trustnet.vshield.parenting.ParentAction
+import com.trustnet.vshield.ui.parenting.LocalParentGate
+
 @Composable
 fun HomeScreen(
     isConnected: Boolean,
@@ -36,6 +40,9 @@ fun HomeScreen(
     onSettingsClick: () -> Unit
 ) {
     val context = LocalContext.current
+
+    // Patch 2: lấy gate
+    val gate = LocalParentGate.current
 
     // State quản lý nút gạt (Lấy giá trị thực tế từ biến Static)
     var isAdultBlocked by remember { mutableStateOf(DomainBlacklist.blockAdult) }
@@ -74,11 +81,18 @@ fun HomeScreen(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.weight(0.5f)
             ) {
+                // Patch 3: gate nút bật/tắt VPN
                 ConnectButton(
                     isConnected = isConnected,
                     buttonColor = buttonColor,
                     iconColor = iconColor,
-                    onClick = onToggleClick
+                    onClick = {
+                        val action =
+                            if (isConnected) ParentAction.ToggleProtectionOff
+                            else ParentAction.ToggleProtectionOn
+
+                        gate.protect(action) { onToggleClick() }
+                    }
                 )
             }
 
@@ -103,10 +117,13 @@ fun HomeScreen(
                     FilterSwitchRow(
                         label = "Web người lớn (Adult)",
                         checked = isAdultBlocked,
+
+                        // Patch 4: gate đổi filter
                         onCheckedChange = { checked ->
-                            isAdultBlocked = checked
-                            // Gọi hàm xử lý thay đổi
-                            handleSettingChange(context, checked, isGamblingBlocked)
+                            gate.protect(ParentAction.ChangeFilterConfig) {
+                                isAdultBlocked = checked
+                                handleSettingChange(context, checked, isGamblingBlocked)
+                            }
                         }
                     )
 
@@ -116,10 +133,13 @@ fun HomeScreen(
                     FilterSwitchRow(
                         label = "Cờ bạc (Gambling)",
                         checked = isGamblingBlocked,
+
+                        // Patch 4: gate đổi filter
                         onCheckedChange = { checked ->
-                            isGamblingBlocked = checked
-                            // Gọi hàm xử lý thay đổi
-                            handleSettingChange(context, isAdultBlocked, checked)
+                            gate.protect(ParentAction.ChangeFilterConfig) {
+                                isGamblingBlocked = checked
+                                handleSettingChange(context, isAdultBlocked, checked)
+                            }
                         }
                     )
                 }
@@ -146,7 +166,6 @@ fun handleSettingChange(context: Context, blockAdult: Boolean, blockGambling: Bo
     DomainBlacklist.blockGambling = blockGambling
 
     // 3. QUAN TRỌNG: Gửi lệnh STOP service (Tắt VPN)
-    // Thay vì gửi lệnh UPDATE, ta gửi lệnh STOP để buộc VPN ngắt kết nối
     val intent = Intent(context, VShieldVpnService::class.java)
     intent.action = VShieldVpnService.ACTION_STOP
     context.startService(intent)
@@ -176,9 +195,11 @@ fun TopAppBar(isConnected: Boolean, onSettingsClick: () -> Unit) {
     ) {
         Column {
             Text("V-Shield Home", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(if (isConnected) "Đang bảo vệ" else "Đã tắt",
+            Text(
+                if (isConnected) "Đang bảo vệ" else "Đã tắt",
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+            )
         }
         IconButton(onClick = onSettingsClick) {
             Icon(Icons.Outlined.Settings, contentDescription = "Settings")
@@ -199,7 +220,6 @@ fun ConnectButton(isConnected: Boolean, buttonColor: Color, iconColor: Color, on
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            // Logic Icon: Nếu đang kết nối -> Khiên. Nếu tắt -> Nút nguồn.
             imageVector = if (isConnected) Icons.Filled.Security else Icons.Filled.PowerSettingsNew,
             contentDescription = "Connect",
             tint = iconColor,
@@ -223,9 +243,17 @@ fun StatsDashboard(isConnected: Boolean, blockedCount: String) {
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f))
     ) {
-        Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround
+        ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(blockedCount, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    blockedCount,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 Text("Đã chặn", style = MaterialTheme.typography.bodySmall)
             }
         }

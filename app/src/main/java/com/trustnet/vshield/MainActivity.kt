@@ -20,6 +20,9 @@ import com.trustnet.vshield.ui.screen.HomeScreen
 import com.trustnet.vshield.ui.screen.SettingsScreen
 import com.trustnet.vshield.ui.theme.VshieldTheme
 
+// ✅ Patch: import ParentGateHost
+import com.trustnet.vshield.ui.parenting.ParentGateHost
+
 class MainActivity : ComponentActivity() {
 
     private val vpnPermissionLauncher = registerForActivityResult(
@@ -42,36 +45,39 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VshieldTheme {
-                val context = LocalContext.current
-                val isRunning by VpnStats.isRunning.observeAsState(initial = false)
-                val blockedCount by VpnStats.blockedCount.observeAsState(initial = 0L)
 
-                var showSettings by rememberSaveable { mutableStateOf(false) }
+                // ✅ Patch: bọc toàn bộ UI bằng ParentGateHost
+                ParentGateHost {
 
-                if (showSettings) {
-                    SettingsScreen(
-                        onBackClick = { showSettings = false },
-                        onUpdateBlocklist = {
-                            // TODO: gắn logic update blocklist thật sự (download/parse/replace)
-                            Toast.makeText(context, "Đang cập nhật blocklist...", Toast.LENGTH_SHORT).show()
+                    val context = LocalContext.current
+                    val isRunning by VpnStats.isRunning.observeAsState(initial = false)
+                    val blockedCount by VpnStats.blockedCount.observeAsState(initial = 0L)
 
-                            // Nếu bạn muốn “buộc VPN reload” sau khi update:
-                            // stopVpnService()
-                            // startVpnService()
-                        }
-                    )
-                } else {
-                    HomeScreen(
-                        isConnected = isRunning,
-                        blockedCount = blockedCount.toString(),
-                        onToggleClick = {
-                            if (isRunning) stopVpnService()
-                            else checkPermissionsAndStart()
-                        },
-                        onSettingsClick = {
-                            showSettings = true
-                        }
-                    )
+                    var showSettings by rememberSaveable { mutableStateOf(false) }
+
+                    if (showSettings) {
+                        SettingsScreen(
+                            onBackClick = { showSettings = false },
+                            onUpdateBlocklist = {
+                                Toast.makeText(context, "Đang cập nhật blocklist...", Toast.LENGTH_SHORT).show()
+                                // Nếu muốn “buộc VPN reload” sau khi update:
+                                // stopVpnService()
+                                // startVpnService()
+                            }
+                        )
+                    } else {
+                        HomeScreen(
+                            isConnected = isRunning,
+                            blockedCount = blockedCount.toString(),
+                            onToggleClick = {
+                                if (isRunning) stopVpnService()
+                                else checkPermissionsAndStart()
+                            },
+                            onSettingsClick = {
+                                showSettings = true
+                            }
+                        )
+                    }
                 }
             }
         }
