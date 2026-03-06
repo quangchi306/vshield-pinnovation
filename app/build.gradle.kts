@@ -43,7 +43,8 @@ android {
 }
 
 dependencies {
-
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jsoup:jsoup:1.17.2")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -71,6 +72,8 @@ dependencies {
     implementation("androidx.compose.runtime:runtime-livedata:1.6.0")
     implementation("androidx.compose.material:material-icons-extended:1.6.0")
     implementation("androidx.compose.material:material-icons-extended:1.5.4")
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     // Room
     val roomVersion = "2.6.1"
     implementation("androidx.room:room-runtime:$roomVersion")

@@ -20,8 +20,9 @@ object DomainBlacklist {
     private const val FILE_GAMBLING  = "blacklist_gambling.txt"
     private const val FILE_WHITELIST = "whitelist.txt"
 
-    @Volatile var blockAdult = true
-    @Volatile var blockGambling = true
+    // Cấu hình chặn
+    @Volatile var blockAdult: Boolean = true
+    @Volatile var blockGambling: Boolean = true
 
     // Không dùng HashSet whitelist nữa
     private val whitelistFilter = AtomicReference<BloomFilter?>()
@@ -91,16 +92,8 @@ object DomainBlacklist {
             }
         }
 
-        //Phishing
-        val pf = phishingFilter.get()
-        if (pf != null) {
-            for (c in candidates) {
-                if (pf.mightContain(c)) {
-                    Log.w(TAG, "BLOCKED [Phishing]: $c (query=$clean)")
-                    return BlockMatch(BlockCategory.PHISHING, c)
-                }
-            }
-        }
+        Log.i(TAG, "Khởi tạo hoàn tất.")
+    }
 
         //Adult
         if (blockAdult) {
