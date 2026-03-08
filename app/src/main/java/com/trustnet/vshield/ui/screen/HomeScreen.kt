@@ -11,11 +11,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +49,14 @@ fun HomeScreen(
 
     var isAdultBlocked by remember { mutableStateOf(DomainBlacklist.blockAdult) }
     var isGamblingBlocked by remember { mutableStateOf(DomainBlacklist.blockGambling) }
+    var blockedDialogMessage by rememberSaveable { mutableStateOf<String?>(null) }
+
+    blockedDialogMessage?.let { message ->
+        ParentingBlockedDialog(
+            message = message,
+            onDismiss = { blockedDialogMessage = null }
+        )
+    }
 
     LaunchedEffect(parentingState.parentingEnabled, isConnected) {
         if (parentingState.parentingEnabled) {
@@ -122,22 +132,15 @@ fun HomeScreen(
                     iconColor = iconColor,
                     onClick = {
                         when {
-                            // Parenting đang bật và Protection đang bật -> không cho tắt từ Home
                             parentingState.parentingEnabled && isConnected -> {
-                                Toast.makeText(
-                                    context,
-                                    "Không thể tắt V-Shield Protection ở Home khi Parenting Mode đang bật. Hãy vào phần Parenting Control trong Settings.",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                blockedDialogMessage =
+                                    "Không thể tắt V-Shield Protection ở màn hình Home khi Parenting Mode đang bật.\n\n" +
+                                            "Nếu muốn thay đổi, hãy vào Settings > Parenting Control."
                             }
 
-                            // Parenting đang bật và Protection đang tắt -> ép bật lại
                             parentingState.parentingEnabled && !isConnected -> {
-                                Toast.makeText(
-                                    context,
-                                    "Parenting Mode yêu cầu V-Shield Protection phải bật.",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                blockedDialogMessage =
+                                    "Parenting Mode yêu cầu V-Shield Protection luôn ở trạng thái bật."
                                 onToggleClick()
                             }
 
@@ -181,11 +184,9 @@ fun HomeScreen(
                         checked = isAdultBlocked,
                         onCheckedChange = { checked ->
                             if (parentingState.parentingEnabled) {
-                                Toast.makeText(
-                                    context,
-                                    "Không thể chỉnh Adult/Gambling khi Parenting Mode đang bật. Hãy vào Cài đặt và tắt Parenting Mode trước.",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                blockedDialogMessage =
+                                    "Không thể thay đổi bộ lọc Adult khi Parenting Mode đang bật.\n\n" +
+                                            "Hãy vào Settings và tắt Parenting Mode trước."
                             } else {
                                 gate.protect(ParentAction.ChangeFilterConfig) {
                                     isAdultBlocked = checked
@@ -205,11 +206,9 @@ fun HomeScreen(
                         checked = isGamblingBlocked,
                         onCheckedChange = { checked ->
                             if (parentingState.parentingEnabled) {
-                                Toast.makeText(
-                                    context,
-                                    "Không thể chỉnh Adult/Gambling khi Parenting Mode đang bật. Hãy vào Cài đặt và tắt Parenting Mode trước.",
-                                    Toast.LENGTH_LONG
-                                ).show()
+                                blockedDialogMessage =
+                                    "Không thể thay đổi bộ lọc Gambling khi Parenting Mode đang bật.\n\n" +
+                                            "Hãy vào Settings và tắt Parenting Mode trước."
                             } else {
                                 gate.protect(ParentAction.ChangeFilterConfig) {
                                     isGamblingBlocked = checked
@@ -411,4 +410,40 @@ fun StatsDashboard(
             }
         }
     }
+}
+
+@Composable
+fun ParentingBlockedDialog(
+    title: String = "Bị khóa bởi Parenting Mode",
+    message: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+        },
+        title = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyLarge
+            )
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text("Đã hiểu")
+            }
+        }
+    )
 }
