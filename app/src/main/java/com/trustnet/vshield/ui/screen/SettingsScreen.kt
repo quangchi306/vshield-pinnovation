@@ -1,6 +1,5 @@
 package com.trustnet.vshield.ui.screen
 
-import android.text.format.DateFormat
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,7 +27,6 @@ import com.trustnet.vshield.parenting.ParentAction
 import com.trustnet.vshield.parenting.ParentingViewModel
 import com.trustnet.vshield.ui.parenting.LocalParentGate
 import com.trustnet.vshield.ui.parenting.ParentSetPasswordDialog
-import java.util.Date
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -236,58 +234,6 @@ fun SettingsScreen(
                             }
                         } else {
                             showSetPasswordDialog = true
-                        }
-                    }
-                )
-            }
-
-            item {
-                val subtitle = when {
-                    !parentingState.hasPassword -> {
-                        "Set a parent password to use unlocked session"
-                    }
-                    parentingState.isUnlocked -> {
-                        val until = parentingState.unlockedUntilEpochMs ?: 0L
-                        val time = DateFormat.getTimeFormat(context).format(Date(until))
-                        "Unlocked until $time"
-                    }
-                    else -> {
-                        "Locked. Tap to unlock for 15 seconds"
-                    }
-                }
-
-                SettingItem(
-                    icon = if (parentingState.isUnlocked) {
-                        Icons.Default.LockOpen
-                    } else {
-                        Icons.Default.Lock
-                    },
-                    title = "Parent Unlocked Session",
-                    subtitle = subtitle,
-                    onClick = {
-                        when {
-                            !parentingState.hasPassword -> {
-                                Toast.makeText(
-                                    context,
-                                    "Hãy đặt mật khẩu phụ huynh trước.",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-
-                            parentingState.isUnlocked -> {
-                                parentingVm.lockNow()
-                                Toast.makeText(
-                                    context,
-                                    "Đã khóa lại.",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-
-                            else -> {
-                                parentGate.protect(ParentAction.UnlockSession) {
-                                    parentingVm.unlockForWindow()
-                                }
-                            }
                         }
                     }
                 )
