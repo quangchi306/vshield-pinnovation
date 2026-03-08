@@ -35,7 +35,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     onBackClick: () -> Unit,
-    onUpdateBlocklist: () -> Unit
+    onUpdateBlocklist: () -> Unit,
+    isProtectionEnabled: Boolean,
+    onForceProtectionOn: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val parentGate = LocalParentGate.current
@@ -68,14 +70,30 @@ fun SettingsScreen(
 
                         if (enableParentingAfterPassword) {
                             parentingVm.setParentingEnabled(true)
+                            enforceParentingFilters(context)
+
+                            if (!isProtectionEnabled) {
+                                onForceProtectionOn()
+                            }
+
                             enableParentingAfterPassword = false
+
+                            Toast.makeText(
+                                context,
+                                "Parenting Mode đã bật. V-Shield Protection, Adult và Gambling được khóa ở trạng thái ON.",
+                                Toast.LENGTH_LONG
+                            ).show()
                         }
 
                         if (ParentingViewModel.ENABLE_UNLOCK_SESSION) {
                             parentingVm.unlockForWindow()
                         }
 
-                        Toast.makeText(context, "Đã lưu mật khẩu phụ huynh.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            "Đã lưu mật khẩu phụ huynh.",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     } else {
                         setPasswordError = err
                     }
@@ -106,7 +124,6 @@ fun SettingsScreen(
                 .padding(padding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Section 1: Network
             item { SectionHeader("NETWORK CONFIGURATION") }
 
             item {
@@ -116,14 +133,16 @@ fun SettingsScreen(
                     subtitle = "Current: Cloudflare (1.1.1.1)",
                     onClick = {
                         parentGate.protect(ParentAction.ChangeDns) {
-                            // TODO: mở dialog chọn DNS thật sự
-                            Toast.makeText(context, "TODO: Mở dialog chọn DNS", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                "TODO: Mở dialog chọn DNS",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
                 )
             }
 
-            // Section 2: Security Filter
             item { SectionHeader("SECURITY FILTER") }
 
             item {
@@ -132,7 +151,6 @@ fun SettingsScreen(
                     title = "Update Blocklist",
                     subtitle = "Tap to fetch latest threats database",
                     onClick = {
-                        // Gate theo cấu hình ParentingViewModel.LOCK_BLOCKLIST_UPDATE
                         parentGate.protect(ParentAction.UpdateBlocklist) {
                             onUpdateBlocklist()
                         }
@@ -149,31 +167,43 @@ fun SettingsScreen(
                 )
             }
 
-            // Section 3: Parenting Control
             item { SectionHeader("PARENTING CONTROL") }
 
             item {
                 SettingSwitchItem(
-                    icon = if (parentingState.parentingEnabled) Icons.Default.Lock else Icons.Default.LockOpen,
+                    icon = if (parentingState.parentingEnabled) {
+                        Icons.Default.Lock
+                    } else {
+                        Icons.Default.LockOpen
+                    },
                     title = "Parenting Mode",
                     subtitle = if (parentingState.parentingEnabled)
-                        "ON - Thao tác nhạy cảm sẽ cần xác minh"
+                        "ON - V-Shield Protection, Adult và Gambling sẽ bị ép bật"
                     else
                         "OFF",
                     checked = parentingState.parentingEnabled,
                     onCheckedChange = { enable ->
                         if (enable) {
-                            // Bật Parenting: bắt buộc phải có password
                             if (!parentingState.hasPassword) {
                                 enableParentingAfterPassword = true
                                 showSetPasswordDialog = true
                             } else {
                                 parentGate.protect(ParentAction.ToggleParentingMode) {
                                     parentingVm.setParentingEnabled(true)
+                                    enforceParentingFilters(context)
+
+                                    if (!isProtectionEnabled) {
+                                        onForceProtectionOn()
+                                    }
+
+                                    Toast.makeText(
+                                        context,
+                                        "Parenting Mode đã bật. V-Shield Protection, Adult và Gambling được ép ON.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 }
                             }
                         } else {
-                            // Tắt Parenting: luôn require auth nếu đã có password
                             if (!parentingState.hasPassword) {
                                 parentingVm.setParentingEnabled(false)
                             } else {
@@ -189,7 +219,11 @@ fun SettingsScreen(
             item {
                 SettingItem(
                     icon = Icons.Default.Key,
-                    title = if (parentingState.hasPassword) "Change Parent Password" else "Set Parent Password",
+                    title = if (parentingState.hasPassword) {
+                        "Change Parent Password"
+                    } else {
+                        "Set Parent Password"
+                    },
                     subtitle = if (parentingState.hasPassword)
                         "Update your parent password"
                     else
@@ -209,30 +243,46 @@ fun SettingsScreen(
 
             item {
                 val subtitle = when {
-                    !parentingState.hasPassword ->
+                    !parentingState.hasPassword -> {
                         "Set a parent password to use unlocked session"
+                    }
                     parentingState.isUnlocked -> {
                         val until = parentingState.unlockedUntilEpochMs ?: 0L
                         val time = DateFormat.getTimeFormat(context).format(Date(until))
                         "Unlocked until $time"
                     }
-                    else ->
-                        "Locked. Tap to unlock for 5 minutes"
+                    else -> {
+                        "Locked. Tap to unlock for 15 seconds"
+                    }
                 }
 
                 SettingItem(
-                    icon = if (parentingState.isUnlocked) Icons.Default.LockOpen else Icons.Default.Lock,
+                    icon = if (parentingState.isUnlocked) {
+                        Icons.Default.LockOpen
+                    } else {
+                        Icons.Default.Lock
+                    },
                     title = "Parent Unlocked Session",
                     subtitle = subtitle,
                     onClick = {
                         when {
                             !parentingState.hasPassword -> {
-                                Toast.makeText(context, "Hãy đặt mật khẩu phụ huynh trước.", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    context,
+                                    "Hãy đặt mật khẩu phụ huynh trước.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
+
                             parentingState.isUnlocked -> {
                                 parentingVm.lockNow()
-                                Toast.makeText(context, "Đã khóa lại.", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    context,
+                                    "Đã khóa lại.",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
+
                             else -> {
                                 parentGate.protect(ParentAction.UnlockSession) {
                                     parentingVm.unlockForWindow()
@@ -243,7 +293,6 @@ fun SettingsScreen(
                 )
             }
 
-            // Section 4: About
             item { SectionHeader("ABOUT") }
 
             item {
@@ -340,6 +389,9 @@ private fun SettingSwitchItem(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
     }
 }

@@ -9,11 +9,11 @@ object PasswordHasher {
 
     private const val ALGORITHM = "PBKDF2WithHmacSHA256"
 
-    // Cân bằng hiệu năng/bảo mật cho mobile (có thể tăng nếu máy mạnh)
+
     private const val DEFAULT_ITERATIONS = 120_000
     private const val DEFAULT_KEY_LENGTH_BITS = 256
 
-    // Best practice: >= 16 bytes
+
     private const val DEFAULT_SALT_LENGTH_BYTES = 16
 
     fun generateSalt(lengthBytes: Int = DEFAULT_SALT_LENGTH_BYTES): ByteArray {

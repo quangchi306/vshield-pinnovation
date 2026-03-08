@@ -32,7 +32,7 @@ fun ParentAuthDialog(
 ) {
     var password by rememberSaveable { mutableStateOf("") }
 
-    // Nếu error đổi, dialog vẫn giữ password để user sửa nhanh
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title, fontWeight = FontWeight.Bold) },
@@ -86,7 +86,7 @@ fun ParentSetPasswordDialog(
     val localError = remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(p1, p2, errorMessage) {
-        // reset local error khi user gõ lại
+
         localError.value = null
     }
 

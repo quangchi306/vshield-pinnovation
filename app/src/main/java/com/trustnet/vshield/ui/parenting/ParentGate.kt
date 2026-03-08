@@ -105,7 +105,7 @@ private fun authTextFor(action: ParentAction): Pair<String, String> {
         ParentAction.ChangeParentPassword ->
             "Xác minh phụ huynh" to "Nhập mật khẩu để đổi mật khẩu phụ huynh."
         ParentAction.UnlockSession ->
-            "Xác minh phụ huynh" to "Nhập mật khẩu để mở khóa tạm thời (5 phút)."
+            "Xác minh phụ huynh" to "Nhập mật khẩu để mở khóa tạm thời (15 giây)."
         ParentAction.Generic ->
             "Xác minh phụ huynh" to "Nhập mật khẩu phụ huynh để tiếp tục."
     }
