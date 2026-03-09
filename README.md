@@ -1,16 +1,16 @@
-# V-Shield Home 🛡️
+# VShield Home 🛡️
 
 ![Platform](https://img.shields.io/badge/Platform-Android-green)
 ![Status](https://img.shields.io/badge/Status-Prototype-orange)
 ![Tech](https://img.shields.io/badge/Core-VpnService%20%2F%20TFLite-blue)
 
-**V-Shield Home** is an Android-based network security application designed to protect home users from online threats. It operates as a local network filter to block phishing, malware, gambling, and inappropriate content directly on the device.
+**VShield Home** is an Android-based network security application designed to protect home users from online threats. It operates as a local network filter to block phishing, malware, gambling, and inappropriate content directly on the device.
 
 This project is developed for the **P-Innovation 2026** competition (PTIT HCM).
 
 ## Overview
 
-Unlike traditional VPNs that route traffic through external servers, V-Shield Home uses the Android **VpnService** to inspect DNS packets locally. This ensures user privacy (data never leaves the device) and minimizes network latency.
+Unlike traditional VPNs that route traffic through external servers, VShield Home uses the Android **VpnService** to inspect DNS packets locally. This ensures user privacy (data never leaves the device) and minimizes network latency.
 
 The system employs a **Hybrid Detection Engine** combining static blocklists with an on-device Machine Learning model to detect zero-day phishing attacks.
 

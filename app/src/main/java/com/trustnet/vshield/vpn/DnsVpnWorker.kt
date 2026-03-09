@@ -13,9 +13,12 @@ import com.trustnet.vshield.vpn.dns.DnsMessageBuilder
 import com.trustnet.vshield.vpn.dns.DnsMessageParser
 import com.trustnet.vshield.vpn.packet.PacketBuilder
 import com.trustnet.vshield.vpn.packet.UdpIpv4Packet
+import com.trustnet.vshield.network.AiResult
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
@@ -48,15 +51,16 @@ class DnsVpnWorker(
     private val outStream = FileOutputStream(tun.fileDescriptor)
 
     private val packetChannel = Channel<ByteArray>(Channel.BUFFERED)
-    private val workerCount = 4
 
-    private val socketPool = DnsSocketPool(service, poolSize = 4)
+    private val workerCount = 10
 
-    // chống spam scrape cùng 1 domain
-    private val inProgressDomains = ConcurrentHashMap<String, Boolean>()
+    private val socketPool = DnsSocketPool(service, poolSize = 10)
 
-    // giới hạn số scraper chạy song song để bảo vệ RAM
+    private val aiTasks = ConcurrentHashMap<String, Deferred<AiResult>>()
+
     private val aiScraperSemaphore = Semaphore(4)
+
+    @Volatile private var lastAlertTime = 0L
 
     fun start() {
         socketPool.initialize()
@@ -101,6 +105,21 @@ class DnsVpnWorker(
         scope.cancel()
     }
 
+    // HÀM ĐÃ ĐỔI TÊN: Bật Notification an toàn
+    private fun triggerBlockingAlertSafe(domain: String, reason: String) {
+        val now = System.currentTimeMillis()
+
+        if (now < VShieldVpnService.uiMuteUntil) {
+            Log.d("VShield", "🔕 SILENT BLOCK (Muted Alert): $domain")
+            return
+        }
+
+        VShieldVpnService.uiMuteUntil = now + 3000
+        mainHandler.post {
+            service.showBlockingNotification(domain, reason) // Truyền lý do vào Service
+        }
+    }
+
     private suspend fun processPacket(packetData: ByteArray) {
         val udpPacket = UdpIpv4Packet.parse(packetData) ?: return
 
@@ -114,14 +133,14 @@ class DnsVpnWorker(
         VpnStats.lastQueryDomain.postValue(qDomain)
 
         var responsePayload: ByteArray? = null
+        var shouldCheckAi = false
 
-        // 1. chặn theo blacklist local trước
         when (DomainBlacklist.getBlockCategory(qDomain)) {
             DomainBlacklist.BlockCategory.PHISHING -> {
                 val count = blocked.incrementAndGet()
                 VpnStats.blockedCount.postValue(count)
                 VpnStats.lastBlockedDomain.postValue(qDomain)
-
+                triggerBlockingAlertSafe(qDomain, "Lừa đảo & Mã độc")
                 responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                 Log.d("VShield", "BLOCKED [PHISHING]: $qDomain")
             }
@@ -131,75 +150,79 @@ class DnsVpnWorker(
                 val count = blocked.incrementAndGet()
                 VpnStats.blockedCount.postValue(count)
                 VpnStats.lastBlockedDomain.postValue(qDomain)
-
-                mainHandler.post {
-                    service.openBlockingScreen(qDomain)
-                }
-
+                triggerBlockingAlertSafe(qDomain, "Nội dung 18+ / Cờ bạc")
                 responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                 Log.d("VShield", "WARN/BLOCKED [CONTENT]: $qDomain")
             }
 
+            DomainBlacklist.BlockCategory.WHITELIST -> {
+                responsePayload = forwardToUpstream(dnsPayload)
+            }
+
             DomainBlacklist.BlockCategory.NONE -> {
-                // không làm gì ở đây, xử lý tiếp bên dưới
+                shouldCheckAi = true
             }
         }
 
-        // 2. nếu đã có quyết định chặn local thì trả luôn
-        if (responsePayload == null) {
+        if (shouldCheckAi) {
             if (qDomain.endsWith(".arpa")) {
                 responsePayload = forwardToUpstream(dnsPayload)
             } else {
-                val isBlockedByAi = AiResultCache.get(qDomain)
+                // Lấy kết quả (gồm cả lý do) từ Cache
+                val aiDecision = AiResultCache.get(qDomain)
 
-                when (isBlockedByAi) {
-                    true -> {
+                if (aiDecision != null) {
+                    // CACHE HIT
+                    if (aiDecision.isBlocked) {
                         val count = blocked.incrementAndGet()
                         VpnStats.blockedCount.postValue(count)
                         VpnStats.lastBlockedDomain.postValue(qDomain)
-
-                        mainHandler.post {
-                            service.openBlockingScreen(qDomain)
-                        }
-
+                        triggerBlockingAlertSafe(qDomain, aiDecision.reason) // Hiện lý do cụ thể
                         responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                         Log.d("VShield", "BLOCKED BY AI (Cache hit): $qDomain")
-                    }
-
-                    false -> {
+                    } else {
                         responsePayload = forwardToUpstream(dnsPayload)
                     }
+                } else {
+                    // CACHE MISS -> REALTIME CHẠY AI
+                    Log.d("VShield", "⏳ Đang treo gói tin để chờ AI phân tích: $qDomain")
 
-                    null -> {
-                        // chưa có kết quả AI -> cho qua trước
-                        responsePayload = forwardToUpstream(dnsPayload)
-
-                        // scrape nền nếu chưa scrape domain này
-                        if (inProgressDomains.putIfAbsent(qDomain, true) == null) {
-                            scope.launch {
-                                try {
-                                    aiScraperSemaphore.withPermit {
-                                        Log.d("VShield", "🔍 Đang trinh sát ngầm: $qDomain")
-                                        val isBad = LocalScraper.scrapeAndAnalyze(qDomain, service)
-                                        AiResultCache.put(qDomain, isBad)
-
-                                        if (isBad) {
-                                            Log.w("VShield", "🚨 PHÁT HIỆN TRỄ (LATE BLOCK): $qDomain")
-                                        }
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e("VShield", "Scraper error for $qDomain: ${e.message}")
-                                } finally {
-                                    inProgressDomains.remove(qDomain)
+                    val deferredTask = aiTasks.computeIfAbsent(qDomain) {
+                        scope.async {
+                            var aiRes = AiResult(false)
+                            try {
+                                aiScraperSemaphore.withPermit {
+                                    aiRes = LocalScraper.scrapeAndAnalyze(qDomain, service)
                                 }
+                                AiResultCache.put(qDomain, aiRes.isMalicious, aiRes.reason)
+                            } catch (e: Exception) {
+                                Log.e("VShield", "Lỗi Scraper cho $qDomain: ${e.message}")
                             }
+                            aiRes
                         }
+                    }
+
+                    val aiResult = try {
+                        deferredTask.await()
+                    } finally {
+                        aiTasks.remove(qDomain)
+                    }
+
+                    if (aiResult.isMalicious) {
+                        val count = blocked.incrementAndGet()
+                        VpnStats.blockedCount.postValue(count)
+                        VpnStats.lastBlockedDomain.postValue(qDomain)
+                        triggerBlockingAlertSafe(qDomain, aiResult.reason) // Truyền lý do thực tế từ ONNX
+                        responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
+                        Log.d("VShield", "🚫 BLOCKED BY AI (Realtime): $qDomain - ${aiResult.reason}")
+                    } else {
+                        responsePayload = forwardToUpstream(dnsPayload)
+                        Log.d("VShield", "✅ SAFE (Realtime): $qDomain")
                     }
                 }
             }
         }
 
-        // 3. ghi phản hồi về lại TUN
         if (responsePayload != null && responsePayload.isNotEmpty()) {
             val ipResponse = PacketBuilder.buildUdpIpv4Packet(
                 srcIp = udpPacket.dstIp,
@@ -220,10 +243,8 @@ class DnsVpnWorker(
 
     private fun forwardToUpstream(dnsQuery: ByteArray): ByteArray? {
         var socket: DatagramSocket? = null
-
         return try {
-            socket = socketPool.borrowSocket(1000)
-
+            socket = socketPool.borrowSocket(2000)
             if (socket == null) {
                 socket = DatagramSocket()
                 if (!service.protect(socket)) return null
@@ -274,26 +295,23 @@ class DnsVpnWorker(
         }
 
         fun borrowSocket(timeoutMs: Long): DatagramSocket? {
-            return queue.poll(timeoutMs, TimeUnit.MILLISECONDS)
+            var socket = queue.poll(timeoutMs, TimeUnit.MILLISECONDS)
+            if (socket == null || socket.isClosed) {
+                socket = createSocket()
+            }
+            return socket
         }
 
         fun returnSocket(socket: DatagramSocket) {
-            if (!queue.offer(socket)) {
-                try {
-                    socket.close()
-                } catch (_: Exception) {
-                }
+            if (!socket.isClosed && !queue.offer(socket)) {
+                try { socket.close() } catch (_: Exception) {}
             }
         }
 
         fun close() {
-            queue.forEach {
-                try {
-                    it.close()
-                } catch (_: Exception) {
-                }
+            while (queue.isNotEmpty()) {
+                try { queue.poll()?.close() } catch (_: Exception) {}
             }
-            queue.clear()
         }
     }
 }

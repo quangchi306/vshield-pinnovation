@@ -12,8 +12,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -33,7 +31,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(
     onBackClick: () -> Unit,
-    onUpdateBlocklist: () -> Unit,
     isProtectionEnabled: Boolean,
     onForceProtectionOn: () -> Unit
 ) {
@@ -70,6 +67,10 @@ fun SettingsScreen(
                             parentingVm.setParentingEnabled(true)
                             enforceParentingFilters(context)
 
+                            // Lưu vào SharedPreferences cho Service đọc
+                            context.getSharedPreferences("VShieldPrefs", android.content.Context.MODE_PRIVATE)
+                                .edit().putBoolean("PARENTING_MODE", true).apply()
+
                             if (!isProtectionEnabled) {
                                 onForceProtectionOn()
                             }
@@ -78,7 +79,7 @@ fun SettingsScreen(
 
                             Toast.makeText(
                                 context,
-                                "Parenting Mode đã bật. V-Shield Protection, Adult và Gambling được khóa ở trạng thái ON.",
+                                "Parenting Mode đã bật. VShield Protection, Adult và Gambling được khóa ở trạng thái ON.",
                                 Toast.LENGTH_LONG
                             ).show()
                         }
@@ -141,30 +142,6 @@ fun SettingsScreen(
                 )
             }
 
-            item { SectionHeader("SECURITY FILTER") }
-
-            item {
-                SettingItem(
-                    icon = Icons.Default.Refresh,
-                    title = "Update Blocklist",
-                    subtitle = "Tap to fetch latest threats database",
-                    onClick = {
-                        parentGate.protect(ParentAction.UpdateBlocklist) {
-                            onUpdateBlocklist()
-                        }
-                    }
-                )
-            }
-
-            item {
-                SettingItem(
-                    icon = Icons.Default.Shield,
-                    title = "Blocklist Version",
-                    subtitle = "v2026.01.26 (154,000 domains)",
-                    onClick = {}
-                )
-            }
-
             item { SectionHeader("PARENTING CONTROL") }
 
             item {
@@ -176,7 +153,7 @@ fun SettingsScreen(
                     },
                     title = "Parenting Mode",
                     subtitle = if (parentingState.parentingEnabled)
-                        "ON - V-Shield Protection, Adult và Gambling sẽ bị ép bật"
+                        "ON - VShield Protection, Adult và Gambling sẽ bị ép bật"
                     else
                         "OFF",
                     checked = parentingState.parentingEnabled,
@@ -190,13 +167,17 @@ fun SettingsScreen(
                                     parentingVm.setParentingEnabled(true)
                                     enforceParentingFilters(context)
 
+                                    // Lưu vào SharedPreferences cho Service
+                                    context.getSharedPreferences("VShieldPrefs", android.content.Context.MODE_PRIVATE)
+                                        .edit().putBoolean("PARENTING_MODE", true).apply()
+
                                     if (!isProtectionEnabled) {
                                         onForceProtectionOn()
                                     }
 
                                     Toast.makeText(
                                         context,
-                                        "Parenting Mode đã bật. V-Shield Protection, Adult và Gambling được ép ON.",
+                                        "Parenting Mode đã bật. VShield Protection, Adult và Gambling được ép ON.",
                                         Toast.LENGTH_LONG
                                     ).show()
                                 }
@@ -204,9 +185,13 @@ fun SettingsScreen(
                         } else {
                             if (!parentingState.hasPassword) {
                                 parentingVm.setParentingEnabled(false)
+                                context.getSharedPreferences("VShieldPrefs", android.content.Context.MODE_PRIVATE)
+                                    .edit().putBoolean("PARENTING_MODE", false).apply()
                             } else {
                                 parentGate.protect(ParentAction.ToggleParentingMode) {
                                     parentingVm.setParentingEnabled(false)
+                                    context.getSharedPreferences("VShieldPrefs", android.content.Context.MODE_PRIVATE)
+                                        .edit().putBoolean("PARENTING_MODE", false).apply()
                                 }
                             }
                         }
@@ -244,8 +229,8 @@ fun SettingsScreen(
             item {
                 SettingItem(
                     icon = Icons.Default.Info,
-                    title = "V-Shield Version",
-                    subtitle = "1.0.0 Stable (Build 2026)",
+                    title = "VShield Version",
+                    subtitle = "1.0.0 Stable",
                     onClick = {}
                 )
             }

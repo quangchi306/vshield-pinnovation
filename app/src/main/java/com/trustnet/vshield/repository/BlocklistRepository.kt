@@ -149,4 +149,32 @@ class BlocklistRepository(private val context: Context) {
         version  = version,
         isActive = isActive,
     )
+    // --- THÊM HÀM NÀY VÀO CUỐI CLASS BlocklistRepository ---
+    suspend fun syncWithProgress(onProgress: suspend (Int, String) -> Unit): SyncResult = withContext(Dispatchers.IO) {
+        try {
+            onProgress(10, "Đang kết nối máy chủ dữ liệu...")
+
+            // Tái sử dụng lại logic Sync cũ
+            val result = if (syncPrefs.needsFullSync) {
+                onProgress(20, "Đang tải dữ liệu tên miền (Full Sync)...")
+                fullSync()
+            } else {
+                onProgress(20, "Đang kiểm tra bản cập nhật (Delta Sync)...")
+                deltaSync()
+            }
+
+            if (result is SyncResult.Success) {
+                onProgress(70, "Đang nạp bộ lọc vào bộ nhớ (RAM)...")
+                DomainBlacklist.reloadFromDatabase(context)
+            } else if (result is SyncResult.AlreadyUpToDate) {
+                onProgress(70, "Dữ liệu tên miền đã ở phiên bản mới nhất.")
+            }
+
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "Sync thất bại: ${e.message}", e)
+            onProgress(70, "Lỗi mạng. Bỏ qua cập nhật và dùng dữ liệu cũ.")
+            SyncResult.Error(e.message ?: "Lỗi không xác định")
+        }
+    }
 }

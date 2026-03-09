@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
-    }
+}
 android {
     namespace = "com.trustnet.vshield"
     compileSdk = 36
@@ -78,6 +78,9 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
+
+    // --- THÊM THƯ VIỆN ONNX RUNTIME ĐỂ CHẠY AI CỤC BỘ ---
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

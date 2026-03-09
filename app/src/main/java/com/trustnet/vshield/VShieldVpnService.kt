@@ -8,14 +8,17 @@ import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import android.provider.Settings
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.trustnet.vshield.core.DomainBlacklist
 import com.trustnet.vshield.core.VpnStats
-import com.trustnet.vshield.ui.screen.BlockedActivity // Import màn hình mới
+import com.trustnet.vshield.parenting.ParentingPrefs
 import com.trustnet.vshield.vpn.DnsVpnWorker
 import com.trustnet.vshield.vpn.packet.UdpIpv4Packet
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class VShieldVpnService : VpnService() {
 
@@ -23,20 +26,47 @@ class VShieldVpnService : VpnService() {
     private var worker: DnsVpnWorker? = null
     @Volatile private var running: Boolean = false
 
+    // ĐÃ THÊM: Biến lưu trạng thái đồng bộ trực tiếp từ DataStore
+    @Volatile private var isParentingMode: Boolean = false
+
     override fun onCreate() {
         super.onCreate()
         DomainBlacklist.init(this)
+
+        // ĐÃ THÊM: Lắng nghe trạng thái Parenting Mode liên tục dưới nền
+        CoroutineScope(Dispatchers.IO).launch {
+            ParentingPrefs(this@VShieldVpnService).data.collect { prefsData ->
+                isParentingMode = prefsData.parentingEnabled
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Xử lý lệnh Bypass từ màn hình đỏ
+        // XỬ LÝ LỆNH BYPASS TỪ NÚT BẤM TRÊN NOTIFICATION
         if (intent?.action == ACTION_ALLOW_DOMAIN) {
-            val domain = intent.getStringExtra(EXTRA_DOMAIN)
-            if (domain != null) {
-                DomainBlacklist.addTemporaryAllow(domain)
+
+            // ĐÃ SỬA: Kiểm tra trực tiếp biến isParentingMode (tự động cập nhật từ DataStore)
+            if (isParentingMode) {
+                // ĐANG BẬT PARENTING MODE -> TỪ CHỐI BYPASS
+                Toast.makeText(this, "Không thể bỏ qua chặn trong Chế độ Phụ huynh!", Toast.LENGTH_SHORT).show()
+                val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                mgr.cancel(BLOCK_NOTIF_ID) // Thu hồi thông báo
+            } else {
+                // CHẾ ĐỘ BÌNH THƯỜNG -> CHO PHÉP BYPASS
+                val domain = intent.getStringExtra(EXTRA_DOMAIN)
+                if (domain != null) {
+                    DomainBlacklist.addTemporaryAllow(domain)
+                    uiMuteUntil = System.currentTimeMillis() + 15000
+
+                    val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                    mgr.cancel(BLOCK_NOTIF_ID)
+
+                    Toast.makeText(this, "Đã cho phép: $domain. Vui lòng tải lại trang!", Toast.LENGTH_LONG).show()
+                }
             }
         }
 
+        // Cập nhật cài đặt bộ lọc cơ bản (Adult/Gambling)
         if (intent?.action == ACTION_UPDATE_SETTINGS) {
             val prefs = getSharedPreferences("VShieldPrefs", MODE_PRIVATE)
             DomainBlacklist.blockAdult = prefs.getBoolean("BLOCK_ADULT", true)
@@ -64,7 +94,7 @@ class VShieldVpnService : VpnService() {
         startInForeground()
 
         val builder = Builder()
-            .setSession("V-Shield Home")
+            .setSession("VShield Home")
             .setMtu(MTU)
             .addAddress(VPN_CLIENT_IP, 32)
             .addRoute(VPN_DNS_IP, 32)
@@ -101,8 +131,14 @@ class VShieldVpnService : VpnService() {
     private fun startInForeground() {
         val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(NOTIF_CH, "V-Shield VPN", NotificationManager.IMPORTANCE_LOW)
+            // Kênh 1: Cho dịch vụ VPN chạy ngầm (Ưu tiên thấp)
+            val ch = NotificationChannel(NOTIF_CH, "VShield VPN", NotificationManager.IMPORTANCE_LOW)
             mgr.createNotificationChannel(ch)
+
+            // Kênh 2: KÊNH CẢNH BÁO CHẶN (ƯU TIÊN CAO ĐỂ HIỆN POP-UP TỪ TRÊN XUỐNG)
+            val alertCh = NotificationChannel(ALERT_NOTIF_CH, "Cảnh báo chặn", NotificationManager.IMPORTANCE_HIGH)
+            alertCh.description = "Hiển thị cảnh báo khi chặn các trang web độc hại"
+            mgr.createNotificationChannel(alertCh)
         }
 
         val pi = PendingIntent.getActivity(
@@ -112,8 +148,8 @@ class VShieldVpnService : VpnService() {
         )
 
         val notification = NotificationCompat.Builder(this, NOTIF_CH)
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentTitle("V-Shield đang bảo vệ")
+            .setSmallIcon(android.R.drawable.ic_secure)
+            .setContentTitle("VShield đang bảo vệ")
             .setContentText("Hệ thống lọc đang chạy ngầm")
             .setContentIntent(pi)
             .setOngoing(true)
@@ -126,23 +162,44 @@ class VShieldVpnService : VpnService() {
         }
     }
 
-    //MỞ MÀN HÌNH CHẶN
-    fun openBlockingScreen(domain: String) {
-        // Kiểm tra quyền "Display over other apps"
-        if (Settings.canDrawOverlays(this)) {
-            val intent = Intent(this, BlockedActivity::class.java)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // Bắt buộc khi gọi từ Service
-            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            intent.putExtra("BLOCKED_DOMAIN", domain)
-            startActivity(intent)
-        } else {
-            // Nếu chưa cấp quyền, hiện thông báo như cũ
-            showBlockingNotification(domain)
-        }
-    }
+    // ĐÃ SỬA: Kiểm tra ẩn/hiện Bypass dựa vào DataStore isParentingMode
+    fun showBlockingNotification(domain: String, reason: String = "Nội dung không phù hợp") {
+        val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
-    // thông báo fallback
-    fun showBlockingNotification(domain: String) {
+        // 1. Xây dựng nền tảng của thông báo
+        val notificationBuilder = NotificationCompat.Builder(this, ALERT_NOTIF_CH)
+            .setSmallIcon(android.R.drawable.ic_secure) // Đổi sang icon cái khiên/khóa cho nhẹ nhàng
+            .setContentTitle("Truy cập bị hạn chế") // Tiêu đề mềm mỏng
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setAutoCancel(true)
+
+        // 2. Rẽ nhánh UI theo Chế độ
+        if (isParentingMode) {
+            // NẾU LÀ PHỤ HUYNH -> Ghi rõ lý do và TUYỆT ĐỐI KHÔNG addAction
+            notificationBuilder.setContentText("Đã chặn: $domain ($reason)")
+        } else {
+            // NẾU LÀ BÌNH THƯỜNG -> Thêm nút Bypass
+            val bypassIntent = Intent(this, VShieldVpnService::class.java).apply {
+                action = ACTION_ALLOW_DOMAIN
+                putExtra(EXTRA_DOMAIN, domain)
+            }
+            val bypassPendingIntent = PendingIntent.getService(
+                this,
+                domain.hashCode(),
+                bypassIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            notificationBuilder.setContentText("Đã chặn: $domain ($reason)")
+            notificationBuilder.addAction(
+                android.R.drawable.ic_menu_revert,
+                "Vẫn tiếp tục truy cập",
+                bypassPendingIntent
+            )
+        }
+
+        mgr.notify(BLOCK_NOTIF_ID, notificationBuilder.build())
     }
 
     companion object {
@@ -161,5 +218,11 @@ class VShieldVpnService : VpnService() {
 
         private const val NOTIF_CH = "vshield_vpn"
         private const val NOTIF_ID = 1001
+
+        // Kênh và ID dành riêng cho Cảnh báo chặn
+        private const val ALERT_NOTIF_CH = "vshield_alerts"
+        private const val BLOCK_NOTIF_ID = 1002
+
+        @Volatile var uiMuteUntil: Long = 0L
     }
 }

@@ -72,7 +72,7 @@ fun HomeScreen(
                 onToggleClick()
                 Toast.makeText(
                     context,
-                    "Parenting Mode đang bật nên V-Shield Protection được tự động bật.",
+                    "Parenting Mode đang bật nên VShield Protection được tự động bật.",
                     Toast.LENGTH_SHORT
                 ).show()
             }
@@ -134,13 +134,13 @@ fun HomeScreen(
                         when {
                             parentingState.parentingEnabled && isConnected -> {
                                 blockedDialogMessage =
-                                    "Không thể tắt V-Shield Protection ở màn hình Home khi Parenting Mode đang bật.\n\n" +
+                                    "Không thể tắt VShield Protection ở màn hình Home khi Parenting Mode đang bật.\n\n" +
                                             "Nếu muốn thay đổi, hãy vào Settings > Parenting Control."
                             }
 
                             parentingState.parentingEnabled && !isConnected -> {
                                 blockedDialogMessage =
-                                    "Parenting Mode yêu cầu V-Shield Protection luôn ở trạng thái bật."
+                                    "Parenting Mode yêu cầu VShield Protection luôn ở trạng thái bật."
                                 onToggleClick()
                             }
 
@@ -304,7 +304,7 @@ fun HomeTopBar(
     ) {
         Column {
             Text(
-                text = "V-Shield Home",
+                text = "VShield Home",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )

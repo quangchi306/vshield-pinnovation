@@ -1,11 +1,13 @@
 package com.trustnet.vshield
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import android.content.pm.PackageManager
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -15,12 +17,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trustnet.vshield.core.DomainBlacklist
 import com.trustnet.vshield.core.VpnStats
 import com.trustnet.vshield.ui.parenting.ParentGateHost
 import com.trustnet.vshield.ui.screen.HomeScreen
 import com.trustnet.vshield.ui.screen.SettingsScreen
+import com.trustnet.vshield.ui.screen.SplashScreen
+import com.trustnet.vshield.ui.screen.SplashViewModel
 import com.trustnet.vshield.ui.theme.VshieldTheme
 
 class MainActivity : ComponentActivity() {
@@ -28,11 +35,17 @@ class MainActivity : ComponentActivity() {
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK) {
+        if (result.resultCode == Activity.RESULT_OK) {
             startVpnService()
         } else {
-            Toast.makeText(this, "Cần cấp quyền để chạy V-Shield", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Cần cấp quyền để chạy Vshield", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        prepareAndStartVpn()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,48 +57,45 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VshieldTheme {
-                ParentGateHost {
-                    val context = LocalContext.current
-                    val isRunning by VpnStats.isRunning.observeAsState(initial = false)
-                    val blockedCount by VpnStats.blockedCount.observeAsState(initial = 0L)
+                val splashVm = viewModel<SplashViewModel>()
 
-                    var showSettings by rememberSaveable { mutableStateOf(false) }
+                val isReady by splashVm.isReady.collectAsState()
+                val progress by splashVm.progress.collectAsState()
+                val statusText by splashVm.statusText.collectAsState()
 
-                    if (showSettings) {
-                        SettingsScreen(
-                            onBackClick = { showSettings = false },
-                            onUpdateBlocklist = {
-                                Toast.makeText(
-                                    context,
-                                    "Đang cập nhật blocklist...",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                // Nếu muốn reload VPN sau khi update:
-                                // stopVpnService()
-                                // startVpnService()
-                            },
-                            isProtectionEnabled = isRunning,
-                            onForceProtectionOn = {
-                                if (!isRunning) {
-                                    checkPermissionsAndStart()
+                if (!isReady) {
+                    // ĐÃ XÓA CÁC THAM SỐ HAS ERROR
+                    SplashScreen(
+                        progress = progress,
+                        statusText = statusText
+                    )
+                }
+                else {
+                    ParentGateHost {
+                        val context = LocalContext.current
+                        val isRunning by VpnStats.isRunning.observeAsState(initial = false)
+                        val blockedCount by VpnStats.blockedCount.observeAsState(initial = 0L)
+
+                        var showSettings by rememberSaveable { mutableStateOf(false) }
+
+                        if (showSettings) {
+                            SettingsScreen(
+                                onBackClick = { showSettings = false },
+                                isProtectionEnabled = isRunning,
+                                onForceProtectionOn = {
+                                    if (!isRunning) checkPermissionsAndStart()
                                 }
-                            }
-                        )
-                    } else {
-                        HomeScreen(
-                            isConnected = isRunning,
-                            blockedCount = blockedCount.toString(),
-                            onToggleClick = {
-                                if (isRunning) {
-                                    stopVpnService()
-                                } else {
-                                    checkPermissionsAndStart()
-                                }
-                            },
-                            onSettingsClick = {
-                                showSettings = true
-                            }
-                        )
+                            )
+                        } else {
+                            HomeScreen(
+                                isConnected = isRunning,
+                                blockedCount = blockedCount.toString(),
+                                onToggleClick = {
+                                    if (isRunning) stopVpnService() else checkPermissionsAndStart()
+                                },
+                                onSettingsClick = { showSettings = true }
+                            )
+                        }
                     }
                 }
             }
@@ -93,21 +103,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkPermissionsAndStart() {
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(
-                this,
-                "Vui lòng cấp quyền 'Hiển thị trên ứng dụng khác' để hiện cảnh báo chặn web",
-                Toast.LENGTH_LONG
-            ).show()
-
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-            startActivity(intent)
-            return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
         }
-
         prepareAndStartVpn()
     }
 

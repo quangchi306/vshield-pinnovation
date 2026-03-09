@@ -3,7 +3,6 @@ package com.trustnet.vshield.core
 import android.content.Context
 import android.util.Log
 import com.trustnet.vshield.data.local.VShieldDatabase
-import com.trustnet.vshield.core.BloomFilter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -20,13 +19,10 @@ object DomainBlacklist {
     private const val FILE_GAMBLING  = "blacklist_gambling.txt"
     private const val FILE_WHITELIST = "whitelist.txt"
 
-    // Cấu hình chặn
     @Volatile var blockAdult: Boolean = true
     @Volatile var blockGambling: Boolean = true
 
-    // Không dùng HashSet whitelist nữa
     private val whitelistFilter = AtomicReference<BloomFilter?>()
-
     private val tempWhitelist = ConcurrentHashMap<String, Long>()
 
     private val phishingFilter = AtomicReference<BloomFilter?>()
@@ -35,7 +31,7 @@ object DomainBlacklist {
 
     @Volatile private var initialized = false
 
-    enum class BlockCategory { PHISHING, ADULT, GAMBLING, NONE }
+    enum class BlockCategory { PHISHING, ADULT, GAMBLING, WHITELIST, NONE }
 
     data class BlockMatch(
         val category: BlockCategory,
@@ -72,12 +68,12 @@ object DomainBlacklist {
         val clean = normalizeDomain(domain) ?: return null
         val candidates = domainCandidates(clean)
 
-        // 1. Temp whitelist (bypass 5 phút)
+        // 1. Temp whitelist
         val now = System.currentTimeMillis()
         for (c in candidates) {
             val expiry = tempWhitelist[c]
             if (expiry != null) {
-                if (now < expiry) return null
+                if (now < expiry) return BlockMatch(BlockCategory.WHITELIST, c)
                 tempWhitelist.remove(c)
             }
         }
@@ -88,7 +84,7 @@ object DomainBlacklist {
             for (c in candidates) {
                 if (wf.mightContain(c)) {
                     Log.d(TAG, "ALLOW by whitelist bloom: $c (query=$clean)")
-                    return null
+                    return BlockMatch(BlockCategory.WHITELIST, c)
                 }
             }
         }
@@ -133,8 +129,10 @@ object DomainBlacklist {
         return null
     }
 
-    fun isBlocked(domain: String): Boolean =
-        getBlockCategory(domain) != BlockCategory.NONE
+    fun isBlocked(domain: String): Boolean {
+        val cat = getBlockCategory(domain)
+        return cat == BlockCategory.PHISHING || cat == BlockCategory.ADULT || cat == BlockCategory.GAMBLING
+    }
 
     fun addTemporaryAllow(domain: String) {
         val clean = normalizeDomain(domain) ?: return
@@ -153,19 +151,22 @@ object DomainBlacklist {
             val adultDomains = dao.getActiveDomainsByCategory("adult")
             val gamblingDomains = dao.getActiveDomainsByCategory("gambling")
 
+            // Nếu Database hoàn toàn trống, ném lỗi để ép nhảy xuống catch đọc từ Assets
+            if (phishingDomains.isEmpty() && adultDomains.isEmpty() && gamblingDomains.isEmpty()) {
+                throw Exception("Database trống, chuyển sang dùng Assets")
+            }
+
             phishingFilter.set(buildFilter(phishingDomains, maxOf(100_000, phishingDomains.size)))
             adultFilter.set(buildFilter(adultDomains, maxOf(50_000, adultDomains.size)))
             gamblingFilter.set(buildFilter(gamblingDomains, maxOf(50_000, gamblingDomains.size)))
 
-            Log.i(
-                TAG,
-                "Loaded blocklist from DB: phishing=${phishingDomains.size}, adult=${adultDomains.size}, gambling=${gamblingDomains.size}"
-            )
+            Log.i(TAG, "Loaded blocklist from DB: phishing=${phishingDomains.size}, adult=${adultDomains.size}, gambling=${gamblingDomains.size}")
             return
         } catch (e: Exception) {
             Log.w(TAG, "Load DB blocklist fail, fallback assets: ${e.message}")
         }
 
+        // Fallback đọc từ Assets
         phishingFilter.set(loadFile(context, FILE_PHISHING, 100_000))
         adultFilter.set(loadFile(context, FILE_ADULT, 50_000))
         gamblingFilter.set(loadFile(context, FILE_GAMBLING, 50_000))
@@ -176,11 +177,10 @@ object DomainBlacklist {
         val whitelistDao = db.whitelistDao()
 
         try {
-            val dbWhitelist = whitelistDao.getAllDomains()
-                .mapNotNull { normalizeDomain(it) }
-
+            val dbWhitelist = whitelistDao.getAllDomains().mapNotNull { normalizeDomain(it) }
             val staticWhitelist = loadStaticWhitelistList(context)
 
+            // Trộn cả Database và Assets lại với nhau
             val merged = LinkedHashSet<String>(staticWhitelist.size + dbWhitelist.size)
             merged.addAll(staticWhitelist)
             merged.addAll(dbWhitelist)
@@ -191,7 +191,6 @@ object DomainBlacklist {
             Log.i(TAG, "Whitelist bloom loaded: total=${merged.size}")
         } catch (e: Exception) {
             Log.w(TAG, "Load whitelist DB fail, fallback assets only: ${e.message}")
-
             val staticWhitelist = loadStaticWhitelistList(context)
             whitelistFilter.set(buildFilter(staticWhitelist, maxOf(staticWhitelist.size, 50_000)))
         }
@@ -212,12 +211,8 @@ object DomainBlacklist {
 
         out.addAll(
             listOf(
-                "google.com",
-                "android.com",
-                "gstatic.com",
-                "googleapis.com",
-                "play.google.com",
-                "accounts.google.com"
+                "google.com", "android.com", "gstatic.com",
+                "googleapis.com", "play.google.com", "accounts.google.com"
             )
         )
 
@@ -225,11 +220,7 @@ object DomainBlacklist {
     }
 
     private fun loadFile(context: Context, fileName: String, size: Int): BloomFilter {
-        val filter = BloomFilter.create(
-            expectedInsertions = size,
-            falsePositiveRate = 0.001
-        )
-
+        val filter = BloomFilter.create(expectedInsertions = size, falsePositiveRate = 0.0000001)
         try {
             context.assets.open(fileName).bufferedReader().useLines { lines ->
                 lines.forEach { line ->
@@ -239,20 +230,14 @@ object DomainBlacklist {
         } catch (e: Exception) {
             Log.w(TAG, "Không tìm thấy assets/$fileName: ${e.message}")
         }
-
         return filter
     }
 
     private fun buildFilter(domains: List<String>, size: Int): BloomFilter {
-        val filter = BloomFilter.create(
-            expectedInsertions = size,
-            falsePositiveRate = 0.001
-        )
-
+        val filter = BloomFilter.create(expectedInsertions = size, falsePositiveRate = 0.0000001)
         domains.forEach { d ->
             normalizeDomain(d)?.let { filter.add(it) }
         }
-
         return filter
     }
 
@@ -272,24 +257,19 @@ object DomainBlacklist {
                     continue
                 }
             }
-
             out.add(candidateParts.joinToString("."))
         }
-
         if (out.isEmpty()) out.add(cleanDomain)
         return out
     }
 
     private fun normalizeDomain(raw: String): String? {
         if (raw.trim().startsWith("#") || raw.isBlank()) return null
-
         var s = raw.trim().lowercase(Locale.ROOT)
-
         if (s.contains("://")) s = s.substringAfter("://")
         if (s.contains("/")) s = s.substringBefore("/")
         if (s.contains(":")) s = s.substringBefore(":")
         s = s.removePrefix("*.").removePrefix("www.").trimEnd('.')
-
         if (s.length < 3 || !s.contains(".")) return null
         return s
     }
