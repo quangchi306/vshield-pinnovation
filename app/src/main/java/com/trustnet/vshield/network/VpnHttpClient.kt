@@ -80,7 +80,8 @@ object VpnHttpClient {
             .dns(dohDns) // Tích hợp DoH siêu tốc
             .connectTimeout(2, TimeUnit.SECONDS)
             .readTimeout(2, TimeUnit.SECONDS) // Ép timeout sớm nếu server chết
-            .followRedirects(false) // Không chạy theo Redirect để tối ưu thời gian
+            .followRedirects(true)
+            .followSslRedirects(true) // Không chạy theo Redirect để tối ưu thời gian
             .build()
     }
 }

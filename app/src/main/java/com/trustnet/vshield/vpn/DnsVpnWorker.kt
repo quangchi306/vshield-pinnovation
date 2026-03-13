@@ -105,7 +105,6 @@ class DnsVpnWorker(
         scope.cancel()
     }
 
-    // HÀM ĐÃ ĐỔI TÊN: Bật Notification an toàn
     private fun triggerBlockingAlertSafe(domain: String, reason: String) {
         val now = System.currentTimeMillis()
 
@@ -116,8 +115,16 @@ class DnsVpnWorker(
 
         VShieldVpnService.uiMuteUntil = now + 3000
         mainHandler.post {
-            service.showBlockingNotification(domain, reason) // Truyền lý do vào Service
+            service.showBlockingNotification(domain, reason)
         }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // FIX BUG 2: Chuẩn hóa domain trước khi lookup cache
+    // Giúp "www.badsite.com" và "badsite.com" dùng chung 1 cache entry
+    // ─────────────────────────────────────────────────────────
+    private fun normalizeForCache(domain: String): String {
+        return domain.removePrefix("www.").lowercase().trim()
     }
 
     private suspend fun processPacket(packetData: ByteArray) {
@@ -168,8 +175,9 @@ class DnsVpnWorker(
             if (qDomain.endsWith(".arpa")) {
                 responsePayload = forwardToUpstream(dnsPayload)
             } else {
-                // Lấy kết quả (gồm cả lý do) từ Cache
-                val aiDecision = AiResultCache.get(qDomain)
+                // FIX BUG 2: Dùng cacheKey đã chuẩn hóa thay vì qDomain thô
+                val cacheKey = normalizeForCache(qDomain)
+                val aiDecision = AiResultCache.get(cacheKey)
 
                 if (aiDecision != null) {
                     // CACHE HIT
@@ -177,7 +185,7 @@ class DnsVpnWorker(
                         val count = blocked.incrementAndGet()
                         VpnStats.blockedCount.postValue(count)
                         VpnStats.lastBlockedDomain.postValue(qDomain)
-                        triggerBlockingAlertSafe(qDomain, aiDecision.reason) // Hiện lý do cụ thể
+                        triggerBlockingAlertSafe(qDomain, aiDecision.reason)
                         responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                         Log.d("VShield", "BLOCKED BY AI (Cache hit): $qDomain")
                     } else {
@@ -187,32 +195,38 @@ class DnsVpnWorker(
                     // CACHE MISS -> REALTIME CHẠY AI
                     Log.d("VShield", "⏳ Đang treo gói tin để chờ AI phân tích: $qDomain")
 
-                    val deferredTask = aiTasks.computeIfAbsent(qDomain) {
+                    // FIX BUG 2: aiTasks cũng dùng cacheKey để dedup đúng
+                    val deferredTask = aiTasks.computeIfAbsent(cacheKey) {
                         scope.async {
                             var aiRes = AiResult(false)
                             try {
                                 aiScraperSemaphore.withPermit {
                                     aiRes = LocalScraper.scrapeAndAnalyze(qDomain, service)
                                 }
-                                AiResultCache.put(qDomain, aiRes.isMalicious, aiRes.reason)
+                                // FIX BUG 3: Cache được lưu bên trong try, đảm bảo
+                                // chạy trước khi task bị remove khỏi aiTasks
+                                AiResultCache.put(cacheKey, aiRes.isMalicious, aiRes.reason)
                             } catch (e: Exception) {
                                 Log.e("VShield", "Lỗi Scraper cho $qDomain: ${e.message}")
+                                // FIX BUG 3: Kể cả khi exception, cache "safe" tạm thời
+                                // để tránh spam scrape lặp lại liên tục
+                                AiResultCache.put(cacheKey, false, "")
                             }
                             aiRes
                         }
                     }
 
-                    val aiResult = try {
-                        deferredTask.await()
-                    } finally {
-                        aiTasks.remove(qDomain)
-                    }
+                    // FIX BUG 3: Tách remove() ra khỏi finally
+                    // Trước đây: finally luôn chạy kể cả khi coroutine bị cancel
+                    // → cache chưa kịp lưu nhưng task đã bị xóa → scrape lại vô tận
+                    val aiResult = deferredTask.await()
+                    aiTasks.remove(cacheKey)
 
                     if (aiResult.isMalicious) {
                         val count = blocked.incrementAndGet()
                         VpnStats.blockedCount.postValue(count)
                         VpnStats.lastBlockedDomain.postValue(qDomain)
-                        triggerBlockingAlertSafe(qDomain, aiResult.reason) // Truyền lý do thực tế từ ONNX
+                        triggerBlockingAlertSafe(qDomain, aiResult.reason)
                         responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                         Log.d("VShield", "🚫 BLOCKED BY AI (Realtime): $qDomain - ${aiResult.reason}")
                     } else {

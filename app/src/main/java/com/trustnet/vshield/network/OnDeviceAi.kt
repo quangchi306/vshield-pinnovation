@@ -23,6 +23,7 @@ object OnDeviceAi {
     fun init(context: Context) {
         if (session != null) return
         try {
+            Preprocessor.init(context) // ← THÊM DÒNG NÀY
             env = OrtEnvironment.getEnvironment()
             val modelBytes = context.assets.open("vshield_model.onnx").readBytes()
             session = env?.createSession(modelBytes, OrtSession.SessionOptions())
@@ -95,7 +96,7 @@ object OnDeviceAi {
                 when (label) {
                     0 -> { // Adult (Web 18+)
                         if (DomainBlacklist.blockAdult) {
-                            AiResult(true, "Nội dung 18+ (Phát hiện bởi AI)", confidence)
+                            AiResult(true, "Nội dung 18+ - Phát hiện bởi AI", confidence)
                         } else {
                             Log.d(TAG, "👉 AI phát hiện Web 18+ nhưng cho qua vì tùy chọn chặn đã TẮT")
                             AiResult(false)
@@ -103,14 +104,14 @@ object OnDeviceAi {
                     }
                     2 -> { // Gambling (Cờ bạc)
                         if (DomainBlacklist.blockGambling) {
-                            AiResult(true, "Cờ bạc (Phát hiện bởi AI)", confidence)
+                            AiResult(true, "Cờ bạc - Phát hiện bởi AI", confidence)
                         } else {
                             Log.d(TAG, "👉 AI phát hiện Web Cờ bạc nhưng cho qua vì tùy chọn chặn đã TẮT")
                             AiResult(false)
                         }
                     }
                     3 -> { // Phishing (Lừa đảo thường là bắt buộc chặn, không có nút tắt)
-                        AiResult(true, "Lừa đảo & Mã độc (Phát hiện bởi AI)", confidence)
+                        AiResult(true, "Lừa đảo & Mã độc - Phát hiện bởi AI", confidence)
                     }
                     else -> AiResult(true, "Trang web đáng ngờ (AI)", confidence)
                 }

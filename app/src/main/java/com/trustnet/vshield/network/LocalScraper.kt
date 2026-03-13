@@ -71,9 +71,9 @@ object LocalScraper {
                 val serverHeader = response.header("Server") ?: ""
                 val xFramePresent= response.header("X-Frame-Options") != null
 
-                var redirectCount = 0
-                var prior = response.priorResponse
-                while (prior != null) { redirectCount++; prior = prior.priorResponse }
+                val originalHost = domain
+                val finalHost = response.request.url.host
+                val redirectCount = if (finalHost != originalHost) 1 else 0
 
                 val handshake = response.handshake
                 val x509      = handshake?.peerCertificates?.firstOrNull() as? X509Certificate
