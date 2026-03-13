@@ -287,6 +287,7 @@ object DomainBlacklist {
             val adultDomains    = dao.getActiveDomainsByCategory("adult")
             val gamblingDomains = dao.getActiveDomainsByCategory("gambling")
 
+            // Nếu Database hoàn toàn trống, ném lỗi để ép nhảy xuống catch đọc từ Assets
             if (phishingDomains.isEmpty() && adultDomains.isEmpty() && gamblingDomains.isEmpty()) {
                 throw Exception("Database trống, chuyển sang dùng Assets")
             }
