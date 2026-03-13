@@ -68,8 +68,8 @@ object Preprocessor {
         if (vocab.isEmpty() || text.isBlank()) return vector
 
         val lowerText = text.lowercase(Locale.ROOT)
-        val wordRegex = Regex("""\b\w\w+\b""")
-        val words = wordRegex.findAll(lowerText).map { it.value }.toList()
+
+        val words = lowerText.split(Regex("\\s+")).filter { it.isNotBlank() }
 
         val tfCount = HashMap<Int, Int>()
 
@@ -90,7 +90,10 @@ object Preprocessor {
 
         var sumSquares = 0.0
         for ((idx, count) in tfCount) {
-            val tfidfValue = count * idf[idx]
+            // Áp dụng Sublinear TF giống hệt Python (1 + ln(tf))
+            val tfValue = if (count > 0) 1.0 + kotlin.math.ln(count.toDouble()) else 0.0
+            val tfidfValue = tfValue * idf[idx]
+
             vector[idx] = tfidfValue.toFloat()
             sumSquares += tfidfValue * tfidfValue
         }

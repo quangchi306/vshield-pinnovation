@@ -5,9 +5,10 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
+import com.trustnet.vshield.core.DomainBlacklist // ĐÃ THÊM: Import biến cấu hình chặn
 import java.nio.FloatBuffer
 
-// ĐÃ THÊM: Data class chứa kết quả phong phú hơn từ AI
+// Data class chứa kết quả phong phú hơn từ AI
 data class AiResult(
     val isMalicious: Boolean,
     val reason: String = "",
@@ -37,10 +38,11 @@ object OnDeviceAi {
         var tensor: OnnxTensor? = null
 
         return try {
-            if (features.size != 3029) return AiResult(false)
+            // ĐÃ SỬA: Bỏ fix cứng 3029 để tương thích với model v3 (3036 features)
+            if (features.isEmpty()) return AiResult(false)
 
             val floatBuffer = FloatBuffer.wrap(features)
-            val shape = longArrayOf(1, 3029)
+            val shape = longArrayOf(1, features.size.toLong()) // Tự động lấy kích thước feature
             tensor = OnnxTensor.createTensor(currentEnv, floatBuffer, shape)
 
             val inputs = mapOf("input" to tensor)
@@ -89,15 +91,29 @@ object OnDeviceAi {
                     return AiResult(false)
                 }
 
-                // Chuyển đổi mã số thành Lý do báo cáo
-                val reason = when (label) {
-                    0 -> "Nội dung 18+ (Phát hiện bởi AI)"
-                    2 -> "Cờ bạc (Phát hiện bởi AI)"
-                    3 -> "Lừa đảo & Mã độc (Phát hiện bởi AI)"
-                    else -> "Trang web đáng ngờ (AI)"
+                // 4. ĐÃ SỬA: ĐỐI CHIẾU AI VỚI TÙY CHỌN CỦA NGƯỜI DÙNG ĐÃ CÀI ĐẶT
+                when (label) {
+                    0 -> { // Adult (Web 18+)
+                        if (DomainBlacklist.blockAdult) {
+                            AiResult(true, "Nội dung 18+ (Phát hiện bởi AI)", confidence)
+                        } else {
+                            Log.d(TAG, "👉 AI phát hiện Web 18+ nhưng cho qua vì tùy chọn chặn đã TẮT")
+                            AiResult(false)
+                        }
+                    }
+                    2 -> { // Gambling (Cờ bạc)
+                        if (DomainBlacklist.blockGambling) {
+                            AiResult(true, "Cờ bạc (Phát hiện bởi AI)", confidence)
+                        } else {
+                            Log.d(TAG, "👉 AI phát hiện Web Cờ bạc nhưng cho qua vì tùy chọn chặn đã TẮT")
+                            AiResult(false)
+                        }
+                    }
+                    3 -> { // Phishing (Lừa đảo thường là bắt buộc chặn, không có nút tắt)
+                        AiResult(true, "Lừa đảo & Mã độc (Phát hiện bởi AI)", confidence)
+                    }
+                    else -> AiResult(true, "Trang web đáng ngờ (AI)", confidence)
                 }
-
-                AiResult(true, reason, confidence)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Lỗi suy luận AI: ${e.message}")
