@@ -6,18 +6,33 @@ import retrofit2.http.*
 
 interface VShieldApiService {
 
+    //Blocklist
+
+    @GET("api/v1/blocklist/full")
+    suspend fun getFullList(
+        @Query("category")  category: String = "all",
+        @Query("page")      page:     Int    = 1,
+        @Query("page_size") pageSize: Int    = 50000,
+    ): Response<FullSyncResponse>
+
     @GET("api/v1/blocklist/delta")
     suspend fun getDelta(
         @Query("since")    since:    Int,
-        @Query("whitelist_since")  whitelistSince: Int = 0,
         @Query("category") category: String = "all",
         @Query("limit")    limit:    Int    = 5000,
     ): Response<DeltaResponse>
 
-    @GET("api/v1/blocklist/full")
-    suspend fun getFullList(
-        @Query("category") category: String = "all",
-    ): Response<FullSyncResponse>
+    //Whitelist
+
+    @GET("api/v1/whitelist/full")
+    suspend fun getWhitelistFull(): Response<WhitelistFullResponse>
+
+    @GET("api/v1/whitelist/delta")
+    suspend fun getWhitelistDelta(
+        @Query("since") since: Int,
+    ): Response<WhitelistDeltaResponse>
+
+    //Stats / Report
 
     @GET("api/v1/stats")
     suspend fun getStats(): Response<StatsResponse>

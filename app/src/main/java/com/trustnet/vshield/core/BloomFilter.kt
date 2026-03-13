@@ -10,12 +10,16 @@ class BloomFilter private constructor(
 ) {
     private val bits = BitSet(bitSize)
 
+    // Đếm số phần tử đã add — dùng để lưu metadata .bin
+    private var insertedCount: Int = 0
+
     fun add(value: String) {
         val (h1, h2) = hashPair(value)
         for (i in 0 until numHashFunctions) {
             val idx = positiveMod(h1 + i * h2, bitSize)
             bits.set(idx)
         }
+        insertedCount++
     }
 
     fun mightContain(value: String): Boolean {
@@ -26,6 +30,10 @@ class BloomFilter private constructor(
         }
         return true
     }
+
+    fun elementCount(): Int = insertedCount
+
+    fun toByteArray(): ByteArray = bits.toByteArray()
 
     private fun positiveMod(x: Int, m: Int): Int {
         val r = x % m
@@ -44,14 +52,15 @@ class BloomFilter private constructor(
             val n = expectedInsertions.coerceAtLeast(1)
             val p = falsePositiveRate.coerceIn(1e-9, 0.5)
             val m = (-(n * ln(p)) / (ln(2.0) * ln(2.0))).roundToInt().coerceAtLeast(64)
-            // SỬA Ở ĐÂY: Nâng giới hạn k lên 30 để hỗ trợ tỷ lệ 0.00001%
             val k = ((m.toDouble() / n) * ln(2.0)).roundToInt().coerceIn(1, 30)
-
             return BloomFilter(m, k)
         }
 
-        // Cập nhật hàm load: Cần truyền vào số lượng domain dự kiến và FPR để tính lại m và k
-        fun loadFromByteArray(data: ByteArray, expectedInsertions: Int, falsePositiveRate: Double = 0.0000001): BloomFilter {
+        fun loadFromByteArray(
+            data: ByteArray,
+            expectedInsertions: Int,
+            falsePositiveRate: Double = 0.0000001
+        ): BloomFilter {
             val n = expectedInsertions.coerceAtLeast(1)
             val p = falsePositiveRate.coerceIn(1e-9, 0.5)
             val m = (-(n * ln(p)) / (ln(2.0) * ln(2.0))).roundToInt().coerceAtLeast(64)
@@ -61,13 +70,13 @@ class BloomFilter private constructor(
             filter.bits.clear()
             val loadedBits = BitSet.valueOf(data)
             filter.bits.or(loadedBits)
-
+            // insertedCount giữ nguyên 0 khi load từ .bin
+            // (chỉ dùng elementCount() sau khi add(), không cần thiết sau load)
             return filter
         }
 
         fun empty(): BloomFilter = BloomFilter(64, 1)
 
-        // MurmurHash3 x86 32-bit (Giữ nguyên của bạn)
         private fun murmur3_32(data: ByteArray, seed: Int): Int {
             var h1 = seed
             val c1 = 0xcc9e2d51.toInt()
@@ -110,9 +119,5 @@ class BloomFilter private constructor(
             h1 = h1 xor (h1 ushr 16)
             return h1
         }
-    }
-
-    fun toByteArray(): ByteArray {
-        return bits.toByteArray()
     }
 }

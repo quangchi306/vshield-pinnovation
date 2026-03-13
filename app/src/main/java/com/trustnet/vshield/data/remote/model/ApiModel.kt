@@ -9,24 +9,41 @@ data class RemoteDomain(
     @SerializedName("version")   val version:  Int,
 )
 
+//Blocklist — đã bỏ whitelisted
+
 data class DeltaResponse(
-    @SerializedName("current_version")   val currentVersion:    Int,
-    @SerializedName("added")             val added:             List<RemoteDomain>,
-    @SerializedName("removed")           val removed:           List<String>,
-    @SerializedName("whitelisted")       val whitelisted:       List<String>,
-    @SerializedName("whitelist_version") val whitelistVersion:  Int,
-    @SerializedName("total_added")       val totalAdded:        Int,
-    @SerializedName("total_removed")     val totalRemoved:      Int,
-    @SerializedName("total_whitelisted") val totalWhitelisted:  Int,
+    @SerializedName("current_version") val currentVersion: Int,
+    @SerializedName("added")           val added:          List<RemoteDomain>,
+    @SerializedName("removed")         val removed:        List<String>,
+    @SerializedName("total_added")     val totalAdded:     Int,
+    @SerializedName("total_removed")   val totalRemoved:   Int,
 )
 
 data class FullSyncResponse(
-    @SerializedName("current_version")   val currentVersion:    Int,
-    @SerializedName("domains")           val domains:           List<RemoteDomain>,
-    @SerializedName("whitelisted")       val whitelisted:       List<String>,
-    @SerializedName("total")             val total:             Int,
-    @SerializedName("total_whitelisted") val totalWhitelisted:  Int,
+    @SerializedName("current_version") val currentVersion: Int,
+    @SerializedName("domains")         val domains:        List<RemoteDomain>,
+    @SerializedName("total")           val total:          Int,
+    @SerializedName("categories")      val categories:     Map<String, Int>,
+    @SerializedName("has_more")        val hasMore:        Boolean = false,
+    @SerializedName("page")            val page:           Int     = 1,
+    @SerializedName("page_size")       val pageSize:       Int     = 50000,
 )
+
+//Whitelist
+
+data class WhitelistFullResponse(
+    @SerializedName("whitelist_version") val whitelistVersion: Int,
+    @SerializedName("domains")           val domains:          List<String>,
+    @SerializedName("total")             val total:            Int,
+)
+
+data class WhitelistDeltaResponse(
+    @SerializedName("whitelist_version") val whitelistVersion: Int,
+    @SerializedName("added")             val added:            List<String>,
+    @SerializedName("total_added")       val totalAdded:       Int,
+)
+
+//Stats / Report
 
 data class StatsResponse(
     @SerializedName("total_domains")   val totalDomains:   Int,

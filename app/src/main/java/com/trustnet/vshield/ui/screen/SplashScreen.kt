@@ -1,6 +1,7 @@
 package com.trustnet.vshield.ui.screen
 
 import android.app.Application
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -13,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.trustnet.vshield.core.DomainBlacklist
 import com.trustnet.vshield.data.local.SyncPreferences
 import com.trustnet.vshield.network.OnDeviceAi
 import com.trustnet.vshield.repository.BlocklistRepository
@@ -25,16 +27,17 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class SplashViewModel(application: Application) : AndroidViewModel(application) {
-    private val repo = BlocklistRepository(application)
+
+    private val repo      = BlocklistRepository(application)
     private val syncPrefs = SyncPreferences(application)
 
-    private val _isReady = MutableStateFlow(false)
+    private val _isReady     = MutableStateFlow(false)
     val isReady = _isReady.asStateFlow()
 
-    private val _progress = MutableStateFlow(0f)
+    private val _progress    = MutableStateFlow(0f)
     val progress = _progress.asStateFlow()
 
-    private val _statusText = MutableStateFlow("Khởi động hệ thống...")
+    private val _statusText  = MutableStateFlow("Khởi động hệ thống...")
     val statusText = _statusText.asStateFlow()
 
     init {
@@ -43,44 +46,99 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
 
     private fun startInitialization() {
         viewModelScope.launch {
-            _progress.value = 0.1f
 
-            // 1. ĐỒNG BỘ DỮ LIỆU TỪ SERVER VỚI CƠ CHẾ AUTO-RETRY
+            //Đã có .bin cache → vào app ngay (~50ms)
+            if (DomainBlacklist.hasBinCache(getApplication())) {
+
+                _progress.value  = 0.1f
+                _statusText.value = "Đang nạp bộ lọc từ cache..."
+
+                val loadOk = withContext(Dispatchers.IO) {
+                    DomainBlacklist.loadFromBinCache(getApplication())
+                }
+
+                // Nếu .bin bị lỗi → fallback load từ DB
+                if (!loadOk) {
+                    _statusText.value = "Cache lỗi, đang nạp từ dữ liệu cũ..."
+                    withContext(Dispatchers.IO) {
+                        DomainBlacklist.init(getApplication())
+                    }
+                }
+
+                _progress.value  = 0.7f
+                _statusText.value = "Đang khởi động AI..."
+
+                withContext(Dispatchers.IO) {
+                    OnDeviceAi.init(getApplication())
+                }
+
+                _progress.value  = 1.0f
+                _statusText.value = "Hoàn tất!"
+                delay(400)
+
+                // Vào app ngay — không chờ sync
+                _isReady.value = true
+
+                // Sync delta ngầm — KHÔNG block UI
+                launch(Dispatchers.IO) {
+                    Log.i("SplashVM", "Bắt đầu sync ngầm sau khi vào app...")
+                    val result = repo.sync()
+                    Log.i("SplashVM", "Sync ngầm hoàn tất: $result")
+                }
+
+                return@launch
+            }
+
+            // NHÁNH CHẬM: Lần đầu cài — bắt buộc sync trước
+            _progress.value  = 0.05f
+            _statusText.value = "Lần đầu khởi động, đang tải dữ liệu..."
+
+            val maxRetry = 5
+            var retryCount = 0
             var syncSuccess = false
+
             while (!syncSuccess) {
                 val result = repo.syncWithProgress { p, text ->
-                    _progress.value = p / 100f
+                    _progress.value  = p / 100f
                     _statusText.value = text
                 }
 
-                if (result is SyncResult.Error) {
-                    if (syncPrefs.needsFullSync) {
-                        // Rớt mạng ở lần tải đầu -> Tự động đợi 2s rồi lặp lại quy trình
-                        _statusText.value = "Mạng yếu. Đang thử kết nối lại..."
-                        delay(2000)
-                    } else {
-                        // Cập nhật Delta thất bại -> Không sao, dùng data cũ
-                        _statusText.value = "Đang dùng dữ liệu ngoại tuyến."
-                        delay(1000)
+                when {
+                    // Sync thành công
+                    result is SyncResult.Success ||
+                            result is SyncResult.AlreadyUpToDate -> {
                         syncSuccess = true
                     }
-                } else {
-                    // Đồng bộ thành công
-                    syncSuccess = true
+
+                    // Lỗi mạng — còn lần retry
+                    result is SyncResult.Error && retryCount < maxRetry -> {
+                        retryCount++
+                        _statusText.value =
+                            "Mạng yếu. Thử lại ($retryCount/$maxRetry)..."
+                        delay(2000)
+                    }
+
+                    // Hết retry — dùng assets bundled sẵn, vẫn cho vào app
+                    else -> {
+                        _statusText.value = "Không có mạng. Dùng dữ liệu mặc định..."
+                        withContext(Dispatchers.IO) {
+                            DomainBlacklist.init(getApplication())
+                        }
+                        syncSuccess = true
+                    }
                 }
             }
 
-            // 2. KHỞI TẠO AI SAU KHI ĐÃ CÓ DATABASE
-            _progress.value = 0.8f
-            _statusText.value = "Đang khởi động Trí tuệ nhân tạo (AI)..."
+            _progress.value  = 0.85f
+            _statusText.value = "Đang khởi động AI..."
 
             withContext(Dispatchers.IO) {
                 OnDeviceAi.init(getApplication())
             }
 
-            _progress.value = 1.0f
+            _progress.value  = 1.0f
             _statusText.value = "Hoàn tất! Mở khóa hệ thống..."
-            delay(800)
+            delay(600)
 
             _isReady.value = true
         }
@@ -108,7 +166,6 @@ fun SplashScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // ĐÃ SỬA THÀNH Vshield
         Text(
             text = "Vshield",
             style = MaterialTheme.typography.headlineLarge,
@@ -123,7 +180,6 @@ fun SplashScreen(
 
         Spacer(modifier = Modifier.height(64.dp))
 
-        // CHỈ HIỆN THANH TIẾN TRÌNH VÀ TEXT (KHÔNG CÒN NÚT THỬ LẠI)
         LinearProgressIndicator(
             progress = progress,
             modifier = Modifier

@@ -11,6 +11,8 @@ import com.trustnet.vshield.data.remote.api.RetrofitClient
 import com.trustnet.vshield.data.remote.model.RemoteDomain
 import com.trustnet.vshield.data.remote.model.ReportRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private const val TAG = "BlocklistRepo"
@@ -29,87 +31,132 @@ class BlocklistRepository(private val context: Context) {
     private val api          = RetrofitClient.api
     private val syncPrefs    = SyncPreferences(context)
 
+    // Mutex chống 2 coroutine sync cùng lúc (WorkManager + SplashViewModel)
+    private val syncMutex = Mutex()
+
+    // ── Public API ────────────────────────────────────────────────────────────
+
     /**
-     *WorkManager call 12h/1.
-     * 1. Chưa có data -> Full sync (blocklist + whitelist)
-     * 2. Đã có data -> data Delta sync
-     * 3. Sau sync -> Reload DomainBlacklist (BloomFilter + HashSet)
+     * WorkManager gọi mỗi 12h.
+     * Blocklist: full hoặc delta tùy needsFullSync
+     * Whitelist: full nếu quá 7 ngày, delta nếu chưa
      */
-    suspend fun sync(): SyncResult = withContext(Dispatchers.IO) {
-        try {
-            val result = if (syncPrefs.needsFullSync) fullSync() else deltaSync()
-            if (result is SyncResult.Success) {
-                DomainBlacklist.reloadFromDatabase(context)
+    suspend fun sync(): SyncResult = syncMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                val result = if (syncPrefs.needsFullSync) fullSync() else deltaSync()
+
+                if (result is SyncResult.Success) {
+                    // Sync whitelist song song với reload BloomFilter
+                    syncWhitelist()
+                    DomainBlacklist.reloadFromDatabaseSync(context)
+                    DomainBlacklist.saveToBinCache(context)
+                }
+                result
+            } catch (e: Exception) {
+                Log.e(TAG, "Sync thất bại: ${e.message}", e)
+                SyncResult.Error(e.message ?: "Lỗi không xác định")
             }
-            result
-        } catch (e: Exception) {
-            Log.e(TAG, "Sync thất bại: ${e.message}", e)
-            SyncResult.Error(e.message ?: "Lỗi không xác định")
         }
     }
 
-    // ── Full sync ──────────────────────────────────────────────────────────
+    /**
+     * Sync có báo cáo tiến trình — dùng trong SplashViewModel.
+     */
+    suspend fun syncWithProgress(
+        onProgress: suspend (Int, String) -> Unit
+    ): SyncResult = syncMutex.withLock {
+        withContext(Dispatchers.IO) {
+            try {
+                onProgress(10, "Đang kết nối máy chủ dữ liệu...")
+
+                val result = if (syncPrefs.needsFullSync) {
+                    onProgress(20, "Đang tải dữ liệu tên miền (Full Sync)...")
+                    fullSync()
+                } else {
+                    onProgress(20, "Đang kiểm tra bản cập nhật (Delta Sync)...")
+                    deltaSync()
+                }
+
+                when (result) {
+                    is SyncResult.Success -> {
+                        onProgress(50, "Đang đồng bộ danh sách cho phép...")
+                        syncWhitelist()
+
+                        onProgress(65, "Đang nạp bộ lọc vào bộ nhớ (RAM)...")
+                        DomainBlacklist.reloadFromDatabaseSync(context)
+
+                        onProgress(85, "Đang lưu cache bộ lọc (.bin)...")
+                        DomainBlacklist.saveToBinCache(context)
+
+                        onProgress(95, "Hoàn tất cập nhật dữ liệu.")
+                    }
+                    is SyncResult.AlreadyUpToDate -> {
+                        onProgress(80, "Dữ liệu tên miền đã ở phiên bản mới nhất.")
+                    }
+                    is SyncResult.Error -> { /* xử lý ở SplashViewModel */ }
+                }
+
+                result
+            } catch (e: Exception) {
+                Log.e(TAG, "Sync thất bại: ${e.message}", e)
+                onProgress(80, "Lỗi mạng. Bỏ qua cập nhật và dùng dữ liệu cũ.")
+                SyncResult.Error(e.message ?: "Lỗi không xác định")
+            }
+        }
+    }
+
+    // ── Blocklist sync ────────────────────────────────────────────────────────
+
     private suspend fun fullSync(): SyncResult {
-        Log.i(TAG, "Full Sync bắt đầu...")
-        val response = api.getFullList()
-        if (!response.isSuccessful)
-            return SyncResult.Error("HTTP ${response.code()}: ${response.message()}")
+        Log.i(TAG, "Blocklist Full Sync bắt đầu...")
 
-        val body = response.body()
-            ?: return SyncResult.Error("Server trả về body rỗng")
-
-        // Lưu blocklist
         dao.deleteAll()
-        dao.insertAll(body.domains.map { it.toEntity() })
+        var page          = 1
+        var totalInserted = 0
+        var lastVersion   = 0
 
-        // Lưu whitelist
-        if (body.whitelisted.isNotEmpty()) {
-            whitelistDao.deleteAll()
-            whitelistDao.insertAll(body.whitelisted.mapIndexed { i, domain ->
-                WhitelistedDomainEntity(domain = domain, version = i + 1)
-            })
-            Log.i(TAG, "Whitelist: ${body.whitelisted.size} domains")
+        while (true) {
+            val response = api.getFullList(page = page, pageSize = 50000)
+            if (!response.isSuccessful)
+                return SyncResult.Error("HTTP ${response.code()}: ${response.message()}")
+
+            val body = response.body()
+                ?: return SyncResult.Error("Server trả về body rỗng")
+
+            dao.insertAll(body.domains.map { it.toEntity() })
+            totalInserted += body.domains.size
+            lastVersion    = body.currentVersion
+
+            Log.i(TAG, "Full Sync trang $page: +${body.domains.size} domains")
+
+            if (!body.hasMore) break
+            page++
         }
 
-        syncPrefs.blocklistVersion  = body.currentVersion
-        syncPrefs.whitelistVersion  = body.totalWhitelisted
-        syncPrefs.lastSyncTime      = System.currentTimeMillis()
-        syncPrefs.needsFullSync     = false
+        syncPrefs.blocklistVersion = lastVersion
+        syncPrefs.lastSyncTime     = System.currentTimeMillis()
+        syncPrefs.needsFullSync    = false
 
-        Log.i(TAG, "Full Sync xong: ${body.total} blocklist + ${body.whitelisted.size} whitelist, version ${body.currentVersion}")
-        return SyncResult.Success(added = body.total, removed = 0, version = body.currentVersion)
+        Log.i(TAG, "Blocklist Full Sync xong: $totalInserted domains, version $lastVersion")
+        return SyncResult.Success(added = totalInserted, removed = 0, version = lastVersion)
     }
 
-    //Delta sync
     private suspend fun deltaSync(): SyncResult {
-        val currentVersion   = syncPrefs.blocklistVersion
-        val whitelistVersion = syncPrefs.whitelistVersion
-        Log.i(TAG, "Delta Sync từ blocklist v$currentVersion, whitelist v$whitelistVersion...")
+        val currentVersion = syncPrefs.blocklistVersion
+        Log.i(TAG, "Blocklist Delta Sync từ v$currentVersion...")
 
-        val response = api.getDelta(
-            since           = currentVersion,
-            whitelistSince  = whitelistVersion,
-        )
+        val response = api.getDelta(since = currentVersion)
         if (!response.isSuccessful)
             return SyncResult.Error("HTTP ${response.code()}: ${response.message()}")
 
         val body = response.body()
             ?: return SyncResult.Error("Server trả về body rỗng")
 
-        // Cập nhật blocklist
         if (body.added.isNotEmpty())   dao.insertAll(body.added.map { it.toEntity() })
         if (body.removed.isNotEmpty()) dao.deactivateDomains(body.removed)
 
-        // Cập nhật whitelist (chỉ append domain mới)
-        if (body.whitelisted.isNotEmpty()) {
-            whitelistDao.insertAll(body.whitelisted.map { domain ->
-                WhitelistedDomainEntity(domain = domain, version = body.whitelistVersion)
-            })
-            syncPrefs.whitelistVersion = body.whitelistVersion
-            Log.i(TAG, "Whitelist delta: +${body.whitelisted.size} domains")
-        }
-
-        if (body.totalAdded == 0 && body.totalRemoved == 0 && body.totalWhitelisted == 0) {
+        if (body.totalAdded == 0 && body.totalRemoved == 0) {
             syncPrefs.lastSyncTime = System.currentTimeMillis()
             return SyncResult.AlreadyUpToDate
         }
@@ -117,7 +164,7 @@ class BlocklistRepository(private val context: Context) {
         syncPrefs.blocklistVersion = body.currentVersion
         syncPrefs.lastSyncTime     = System.currentTimeMillis()
 
-        Log.i(TAG, "Delta Sync xong: +${body.totalAdded}/-${body.totalRemoved} blocklist, +${body.totalWhitelisted} whitelist")
+        Log.i(TAG, "Blocklist Delta xong: +${body.totalAdded}/-${body.totalRemoved}")
         return SyncResult.Success(
             added   = body.totalAdded,
             removed = body.totalRemoved,
@@ -125,7 +172,72 @@ class BlocklistRepository(private val context: Context) {
         )
     }
 
-    //Helpers
+    // ── Whitelist sync — tách riêng ───────────────────────────────────────────
+
+    private suspend fun syncWhitelist() {
+        try {
+            if (syncPrefs.needsWhitelistFullSync) {
+                whitelistFullSync()
+            } else {
+                whitelistDeltaSync()
+            }
+        } catch (e: Exception) {
+            // Whitelist sync lỗi không làm crash toàn bộ sync
+            Log.w(TAG, "Whitelist sync lỗi (bỏ qua): ${e.message}")
+        }
+    }
+
+    private suspend fun whitelistFullSync() {
+        Log.i(TAG, "Whitelist Full Sync bắt đầu...")
+
+        val response = api.getWhitelistFull()
+        if (!response.isSuccessful) {
+            Log.w(TAG, "Whitelist Full Sync HTTP ${response.code()}")
+            return
+        }
+
+        val body = response.body() ?: return
+
+        whitelistDao.deleteAll()
+        whitelistDao.insertAll(body.domains.mapIndexed { i, domain ->
+            WhitelistedDomainEntity(domain = domain, version = i + 1)
+        })
+
+        syncPrefs.whitelistVersion      = body.whitelistVersion
+        syncPrefs.lastWhitelistSyncTime = System.currentTimeMillis()
+
+        Log.i(TAG, "Whitelist Full Sync xong: ${body.total} domains, version ${body.whitelistVersion}")
+    }
+
+    private suspend fun whitelistDeltaSync() {
+        val currentVersion = syncPrefs.whitelistVersion
+        Log.i(TAG, "Whitelist Delta Sync từ v$currentVersion...")
+
+        val response = api.getWhitelistDelta(since = currentVersion)
+        if (!response.isSuccessful) {
+            Log.w(TAG, "Whitelist Delta HTTP ${response.code()}")
+            return
+        }
+
+        val body = response.body() ?: return
+
+        if (body.added.isEmpty()) {
+            Log.i(TAG, "Whitelist đã mới nhất.")
+            return
+        }
+
+        whitelistDao.insertAll(body.added.map { domain ->
+            WhitelistedDomainEntity(domain = domain, version = body.whitelistVersion)
+        })
+
+        syncPrefs.whitelistVersion      = body.whitelistVersion
+        syncPrefs.lastWhitelistSyncTime = System.currentTimeMillis()
+
+        Log.i(TAG, "Whitelist Delta xong: +${body.totalAdded} domains")
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
     suspend fun reportDomain(domain: String, category: String): Result<String> =
         withContext(Dispatchers.IO) {
             try {
@@ -149,32 +261,4 @@ class BlocklistRepository(private val context: Context) {
         version  = version,
         isActive = isActive,
     )
-    // --- THÊM HÀM NÀY VÀO CUỐI CLASS BlocklistRepository ---
-    suspend fun syncWithProgress(onProgress: suspend (Int, String) -> Unit): SyncResult = withContext(Dispatchers.IO) {
-        try {
-            onProgress(10, "Đang kết nối máy chủ dữ liệu...")
-
-            // Tái sử dụng lại logic Sync cũ
-            val result = if (syncPrefs.needsFullSync) {
-                onProgress(20, "Đang tải dữ liệu tên miền (Full Sync)...")
-                fullSync()
-            } else {
-                onProgress(20, "Đang kiểm tra bản cập nhật (Delta Sync)...")
-                deltaSync()
-            }
-
-            if (result is SyncResult.Success) {
-                onProgress(70, "Đang nạp bộ lọc vào bộ nhớ (RAM)...")
-                DomainBlacklist.reloadFromDatabase(context)
-            } else if (result is SyncResult.AlreadyUpToDate) {
-                onProgress(70, "Dữ liệu tên miền đã ở phiên bản mới nhất.")
-            }
-
-            result
-        } catch (e: Exception) {
-            Log.e(TAG, "Sync thất bại: ${e.message}", e)
-            onProgress(70, "Lỗi mạng. Bỏ qua cập nhật và dùng dữ liệu cũ.")
-            SyncResult.Error(e.message ?: "Lỗi không xác định")
-        }
-    }
 }
