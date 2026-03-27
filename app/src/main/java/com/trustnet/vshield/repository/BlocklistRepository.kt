@@ -40,18 +40,51 @@ class BlocklistRepository(private val context: Context) {
      * WorkManager gọi mỗi 12h.
      * Blocklist: full hoặc delta tùy needsFullSync
      * Whitelist: full nếu quá 7 ngày, delta nếu chưa
+     *
+     * FIX: Xử lý đúng cả trường hợp AlreadyUpToDate.
+     * Nếu bin cache không tồn tại (bị xóa), phải reload từ DB và tạo lại cache
+     * dù server báo "không có gì mới". Đây là nguyên nhân gốc rễ gây lỗi
+     * whitelist/blacklist bị vô hiệu hóa vĩnh viễn sau khi xóa cache app.
      */
     suspend fun sync(): SyncResult = syncMutex.withLock {
         withContext(Dispatchers.IO) {
             try {
                 val result = if (syncPrefs.needsFullSync) fullSync() else deltaSync()
 
-                if (result is SyncResult.Success) {
-                    // Sync whitelist song song với reload BloomFilter
-                    syncWhitelist()
-                    DomainBlacklist.reloadFromDatabaseSync(context)
-                    DomainBlacklist.saveToBinCache(context)
+                when (result) {
+                    is SyncResult.Success -> {
+                        // Sync whitelist song song với reload BloomFilter
+                        syncWhitelist()
+                        DomainBlacklist.reloadFromDatabaseSync(context)
+                        DomainBlacklist.saveToBinCache(context)
+                    }
+
+                    is SyncResult.AlreadyUpToDate -> {
+                        // FIX LỖI CHÍNH: AlreadyUpToDate không có nghĩa là filter đã nạp!
+                        // Kịch bản: xóa cache app → bin cache mất → mở app → deltaSync
+                        // trả về AlreadyUpToDate → filter mãi là null → whitelist/blacklist
+                        // không hoạt động và lỗi lặp lại mỗi lần mở app.
+                        when {
+                            !DomainBlacklist.isListsReady() -> {
+                                // Filter chưa nạp vào RAM → nạp từ DB rồi tạo bin cache
+                                Log.i(TAG, "AlreadyUpToDate nhưng filter chưa nạp — reload từ DB...")
+                                DomainBlacklist.reloadFromDatabaseSync(context)
+                                DomainBlacklist.saveToBinCache(context)
+                            }
+                            !DomainBlacklist.hasBinCache(context) -> {
+                                // Filter đang có trong RAM nhưng bin cache mất → chỉ cần tạo lại cache
+                                Log.i(TAG, "AlreadyUpToDate nhưng bin cache mất — tạo lại...")
+                                DomainBlacklist.saveToBinCache(context)
+                            }
+                            else -> {
+                                Log.i(TAG, "AlreadyUpToDate, filter OK, bin cache OK — bỏ qua.")
+                            }
+                        }
+                    }
+
+                    is SyncResult.Error -> { /* không làm gì, lỗi đã log bên dưới */ }
                 }
+
                 result
             } catch (e: Exception) {
                 Log.e(TAG, "Sync thất bại: ${e.message}", e)
@@ -62,6 +95,8 @@ class BlocklistRepository(private val context: Context) {
 
     /**
      * Sync có báo cáo tiến trình — dùng trong SplashViewModel.
+     *
+     * FIX: Xử lý đúng AlreadyUpToDate giống hàm sync() ở trên.
      */
     suspend fun syncWithProgress(
         onProgress: suspend (Int, String) -> Unit
@@ -91,9 +126,30 @@ class BlocklistRepository(private val context: Context) {
 
                         onProgress(95, "Hoàn tất cập nhật dữ liệu.")
                     }
+
                     is SyncResult.AlreadyUpToDate -> {
-                        onProgress(80, "Dữ liệu tên miền đã ở phiên bản mới nhất.")
+                        // FIX LỖI CHÍNH (giống hàm sync() ở trên):
+                        when {
+                            !DomainBlacklist.isListsReady() -> {
+                                onProgress(65, "Dữ liệu mới nhất. Đang nạp bộ lọc vào RAM...")
+                                DomainBlacklist.reloadFromDatabaseSync(context)
+
+                                onProgress(85, "Đang lưu cache bộ lọc (.bin)...")
+                                DomainBlacklist.saveToBinCache(context)
+
+                                onProgress(95, "Hoàn tất.")
+                            }
+                            !DomainBlacklist.hasBinCache(context) -> {
+                                onProgress(85, "Đang tạo lại cache bộ lọc (.bin)...")
+                                DomainBlacklist.saveToBinCache(context)
+                                onProgress(95, "Hoàn tất.")
+                            }
+                            else -> {
+                                onProgress(80, "Dữ liệu tên miền đã ở phiên bản mới nhất.")
+                            }
+                        }
                     }
+
                     is SyncResult.Error -> { /* xử lý ở SplashViewModel */ }
                 }
 

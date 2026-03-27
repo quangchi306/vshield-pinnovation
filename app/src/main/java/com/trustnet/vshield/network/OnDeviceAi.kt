@@ -5,7 +5,7 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import android.util.Log
-import com.trustnet.vshield.core.DomainBlacklist // ĐÃ THÊM: Import biến cấu hình chặn
+import com.trustnet.vshield.core.DomainBlacklist
 import java.nio.FloatBuffer
 
 // Data class chứa kết quả phong phú hơn từ AI
@@ -23,7 +23,7 @@ object OnDeviceAi {
     fun init(context: Context) {
         if (session != null) return
         try {
-            Preprocessor.init(context) // ← THÊM DÒNG NÀY
+            Preprocessor.init(context)
             env = OrtEnvironment.getEnvironment()
             val modelBytes = context.assets.open("vshield_model.onnx").readBytes()
             session = env?.createSession(modelBytes, OrtSession.SessionOptions())
@@ -34,43 +34,43 @@ object OnDeviceAi {
     }
 
     fun predict(features: FloatArray): AiResult {
-        val currentEnv = env ?: return AiResult(false)
+        val currentEnv     = env     ?: return AiResult(false)
         val currentSession = session ?: return AiResult(false)
         var tensor: OnnxTensor? = null
 
         return try {
-            // ĐÃ SỬA: Bỏ fix cứng 3029 để tương thích với model v3 (3036 features)
+            // Model v4: tự động nhận FloatArray(3036) features
             if (features.isEmpty()) return AiResult(false)
 
             val floatBuffer = FloatBuffer.wrap(features)
-            val shape = longArrayOf(1, features.size.toLong()) // Tự động lấy kích thước feature
-            tensor = OnnxTensor.createTensor(currentEnv, floatBuffer, shape)
+            val shape       = longArrayOf(1, features.size.toLong())
+            tensor          = OnnxTensor.createTensor(currentEnv, floatBuffer, shape)
 
             val inputs = mapOf("input" to tensor)
 
             currentSession.run(inputs).use { result ->
-                // 1. LẤY NHÃN DỰ ĐOÁN (PREDICTED LABEL) TỪ result[0]
+                // 1. Lấy nhãn dự đoán từ result[0]
                 val labelResult = result[0].value
                 var label = -1
 
                 if (labelResult is LongArray) label = labelResult[0].toInt()
                 else if (labelResult is IntArray) label = labelResult[0]
 
-                // 2. LẤY XÁC SUẤT (PROBABILITIES) TỪ result[1]
+                // 2. Lấy xác suất từ result[1]
                 var confidence = 1.0f
                 if (result.size() > 1 && label != -1) {
                     try {
                         val probValue = result[1].value
                         if (probValue is Iterable<*>) {
                             // Xử lý ZipMap (List<Map<Long, Float>>)
-                            val map = probValue.firstOrNull() as? Map<*, *>
+                            val map  = probValue.firstOrNull() as? Map<*, *>
                             val prob = (map?.get(label.toLong()) as? Number)?.toFloat()
                                 ?: (map?.get(label) as? Number)?.toFloat()
                             if (prob != null) confidence = prob
                         } else if (probValue is Array<*>) {
                             // Xử lý mảng 2 chiều (FloatArray hoặc DoubleArray)
                             val row = probValue[0]
-                            if (row is FloatArray) confidence = row[label]
+                            if (row is FloatArray)  confidence = row[label]
                             else if (row is DoubleArray) confidence = row[label].toFloat()
                         }
                     } catch (e: Exception) {
@@ -80,19 +80,20 @@ object OnDeviceAi {
 
                 Log.d(TAG, "🧠 AI Output -> Label: $label, Confidence: ${confidence * 100}%")
 
-                // 3. LOGIC XỬ LÝ DỰA TRÊN LABEL VÀ THRESHOLD
-                // Label 1 là Benign (Web an toàn)
+                // 3. Logic xử lý kết quả
+                // Label mapping (label_classes từ preprocessor_data.json):
+                //   0 = adult | 1 = benign | 2 = gambling | 3 = phishing
                 if (label == 1 || label == -1) {
                     return AiResult(false)
                 }
 
-                // NGƯỠNG TỰ TIN: Chỉ chặn khi AI chắc chắn >= 85%
+                // Ngưỡng tự tin: chỉ chặn khi AI chắc chắn >= 85%
                 if (confidence < 0.85f) {
                     Log.d(TAG, "👉 Tha bổng do độ tự tin AI quá thấp (< 85%)")
                     return AiResult(false)
                 }
 
-                // 4. ĐÃ SỬA: ĐỐI CHIẾU AI VỚI TÙY CHỌN CỦA NGƯỜI DÙNG ĐÃ CÀI ĐẶT
+                // 4. Đối chiếu nhãn AI với tùy chọn người dùng
                 when (label) {
                     0 -> { // Adult (Web 18+)
                         if (DomainBlacklist.blockAdult) {
@@ -110,7 +111,7 @@ object OnDeviceAi {
                             AiResult(false)
                         }
                     }
-                    3 -> { // Phishing (Lừa đảo thường là bắt buộc chặn, không có nút tắt)
+                    3 -> { // Phishing (Lừa đảo — luôn chặn, không có nút tắt)
                         AiResult(true, "Lừa đảo & Mã độc - Phát hiện bởi AI", confidence)
                     }
                     else -> AiResult(true, "Trang web đáng ngờ (AI)", confidence)
