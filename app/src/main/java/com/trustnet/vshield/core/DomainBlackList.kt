@@ -335,7 +335,7 @@ object DomainBlacklist {
     private fun normalizeDomain(raw: String): String? {
         if (raw.trim().startsWith("#") || raw.isBlank()) return null
         var s = raw.trim().lowercase(Locale.ROOT)
-        if (s.contains(git "://")) s = s.substringAfter("://")
+        if (s.contains("://")) s = s.substringAfter("://")
         if (s.contains("/"))   s = s.substringBefore("/")
         if (s.contains(":"))   s = s.substringBefore(":")
         s = s.removePrefix("*.").removePrefix("www.").trimEnd('.')

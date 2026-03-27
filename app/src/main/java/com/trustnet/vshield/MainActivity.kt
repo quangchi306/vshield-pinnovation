@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
@@ -40,12 +41,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.runtime.remember
 import com.trustnet.vshield.core.BlockedDomainLog
 import com.trustnet.vshield.core.DomainBlacklist
 import com.trustnet.vshield.core.VpnStats
@@ -58,7 +57,8 @@ import com.trustnet.vshield.ui.screen.SplashScreen
 import com.trustnet.vshield.ui.screen.SplashViewModel
 import com.trustnet.vshield.ui.theme.VshieldTheme
 
-// Định nghĩa các tab trong bottom nav
+private const val TAG = "MainActivity"
+
 private enum class AppTab(
     val label: String,
     val icon: ImageVector
@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.i(TAG, "onCreate")
 
         val prefs = getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
         DomainBlacklist.blockAdult    = prefs.getBoolean("BLOCK_ADULT",    true)
@@ -97,7 +98,6 @@ class MainActivity : ComponentActivity() {
             if (VpnStats.isRunning.value == true) {
                 showExitBlockedDialog()
             } else {
-                // VPN tắt → cho phép thoát bình thường
                 isEnabled = false
                 onBackPressedDispatcher.onBackPressed()
             }
@@ -114,18 +114,21 @@ class MainActivity : ComponentActivity() {
                     SplashScreen(progress = progress, statusText = statusText)
                 } else {
                     ParentGateHost {
-                        val isRunning      by VpnStats.isRunning.observeAsState(initial = false)
-                        val blockedCount   by VpnStats.blockedCount.observeAsState(initial = 0L)
+                        val isRunning by VpnStats.isRunning.observeAsState(initial = false)
+                        val blockedCount by VpnStats.blockedCount.observeAsState(initial = 0L)
                         val blockedEntries by BlockedDomainLog.entries.collectAsState()
 
-                        val parentingVm    = viewModel<ParentingViewModel>()
+                        val parentingVm = viewModel<ParentingViewModel>()
                         val parentingState by parentingVm.uiState.collectAsState()
 
-                        // Tab hiện tại và trạng thái Settings
-                        var selectedTab  by rememberSaveable { mutableIntStateOf(AppTab.HOME.ordinal) }
+                        var selectedTab by rememberSaveable { mutableIntStateOf(AppTab.HOME.ordinal) }
                         var showSettings by rememberSaveable { mutableStateOf(false) }
 
-                        // Màn hình Settings phủ toàn bộ (không có bottom nav)
+                        // Log để debug
+                        androidx.compose.runtime.LaunchedEffect(isRunning) {
+                            Log.d(TAG, "UI isRunning changed: $isRunning")
+                        }
+
                         if (showSettings) {
                             SettingsScreen(
                                 onBackClick         = { showSettings = false },
@@ -150,7 +153,6 @@ class MainActivity : ComponentActivity() {
                                         .padding(innerPadding)
                                 ) {
                                     when (AppTab.entries[selectedTab]) {
-
                                         AppTab.HOME -> HomeScreen(
                                             isConnected     = isRunning,
                                             blockedCount    = blockedCount.toString(),
@@ -160,7 +162,6 @@ class MainActivity : ComponentActivity() {
                                             },
                                             onSettingsClick = { showSettings = true }
                                         )
-
                                         AppTab.BLOCKED -> BlockedScreen(
                                             entries          = blockedEntries,
                                             parentingEnabled = parentingState.parentingEnabled,
@@ -184,7 +185,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Khi nhấn Home trong khi VPN đang bật → nhắc nhở user
+    override fun onResume() {
+        super.onResume()
+        Log.i(TAG, "onResume - VPN running: ${VpnStats.isRunning.value}")
+        // Nếu VPN đang chạy, đảm bảo service vẫn còn (không cần làm gì thêm)
+    }
+
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (VpnStats.isRunning.value == true) {
@@ -196,16 +202,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Khi user swipe app khỏi recents → onDestroy() được gọi với isFinishing = true
-    // Dừng VPN service sạch sẽ để tránh filter bị lỗi khi mở lại app
     override fun onDestroy() {
         super.onDestroy()
-        if (isFinishing && VpnStats.isRunning.value == true) {
-            stopVpnService()
-        }
+        Log.i(TAG, "onDestroy - isFinishing=$isFinishing, isRunning=${VpnStats.isRunning.value}")
+        // KHÔNG dừng VPN khi activity bị destroy (clear tab)
+        // VPN chỉ dừng khi user bấm nút tắt trong UI
     }
-
-    // ── Dialog ───────────────────────────────────────────────────────────────
 
     private fun showExitBlockedDialog() {
         AlertDialog.Builder(this)
@@ -217,14 +219,11 @@ class MainActivity : ComponentActivity() {
             )
             .setPositiveButton("Tắt bảo vệ & Thoát") { _, _ ->
                 stopVpnService()
-                // Delay nhỏ để service kịp dừng trước khi finish
                 window.decorView.postDelayed({ finish() }, 300)
             }
             .setNegativeButton("Ở lại", null)
             .show()
     }
-
-    // ── VPN helpers ───────────────────────────────────────────────────────────
 
     private fun checkPermissionsAndStart() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -246,6 +245,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startVpnService() {
+        Log.i(TAG, "startVpnService")
         startService(
             Intent(this, VShieldVpnService::class.java).apply {
                 action = VShieldVpnService.ACTION_START
@@ -254,6 +254,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopVpnService() {
+        Log.i(TAG, "stopVpnService")
         startService(
             Intent(this, VShieldVpnService::class.java).apply {
                 action = VShieldVpnService.ACTION_STOP
@@ -261,10 +262,6 @@ class MainActivity : ComponentActivity() {
         )
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Bottom Navigation Bar
-// ─────────────────────────────────────────────────────────────────────────────
 
 @androidx.compose.runtime.Composable
 private fun AppBottomNavBar(

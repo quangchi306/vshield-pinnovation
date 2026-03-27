@@ -190,442 +190,6 @@ val Typography = Typography(
 )
 
 ========================================
-FILE: ./app/src/main/java/com/trustnet/vshield/ui/screen/HomeScreen.kt
-========================================
-
-package com.trustnet.vshield.ui.screen
-
-import android.content.Context
-import android.content.Intent
-import android.widget.Toast
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.PowerSettingsNew
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.trustnet.vshield.VShieldVpnService
-import com.trustnet.vshield.core.DomainBlacklist
-import com.trustnet.vshield.parenting.ParentAction
-import com.trustnet.vshield.parenting.ParentingViewModel
-import com.trustnet.vshield.ui.parenting.LocalParentGate
-
-@Composable
-fun HomeScreen(
-    isConnected: Boolean,
-    blockedCount: String,
-    onToggleClick: () -> Unit,
-    onSettingsClick: () -> Unit
-) {
-    val context = LocalContext.current
-    val gate    = LocalParentGate.current
-
-    val parentingVm: ParentingViewModel = viewModel()
-    val parentingState by parentingVm.uiState.collectAsState()
-
-    var isAdultBlocked    by remember { mutableStateOf(DomainBlacklist.blockAdult) }
-    var isGamblingBlocked by remember { mutableStateOf(DomainBlacklist.blockGambling) }
-    var blockedDialogMessage by rememberSaveable { mutableStateOf<String?>(null) }
-
-    blockedDialogMessage?.let { message ->
-        ParentingBlockedDialog(
-            message   = message,
-            onDismiss = { blockedDialogMessage = null }
-        )
-    }
-
-    LaunchedEffect(parentingState.parentingEnabled, isConnected) {
-        if (parentingState.parentingEnabled) {
-            if (!isAdultBlocked || !isGamblingBlocked) {
-                isAdultBlocked    = true
-                isGamblingBlocked = true
-                enforceParentingFilters(context)
-            }
-            if (!isConnected) {
-                onToggleClick()
-                Toast.makeText(
-                    context,
-                    "Parenting Mode đang bật nên VShield Protection được tự động bật.",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        }
-    }
-
-    val backgroundColor by animateColorAsState(
-        targetValue   = if (isConnected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surface,
-        animationSpec = tween(500),
-        label         = "bgColor"
-    )
-
-    val buttonColor by animateColorAsState(
-        targetValue   = if (isConnected) MaterialTheme.colorScheme.primary
-        else MaterialTheme.colorScheme.secondaryContainer,
-        animationSpec = tween(500),
-        label         = "btnColor"
-    )
-
-    val iconColor by animateColorAsState(
-        targetValue   = if (isConnected) MaterialTheme.colorScheme.onPrimary
-        else MaterialTheme.colorScheme.onSecondaryContainer,
-        animationSpec = tween(500),
-        label         = "iconColor"
-    )
-
-    Scaffold(
-        containerColor = backgroundColor,
-        topBar = { HomeTopBar(isConnected, onSettingsClick) }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(16.dp),
-            horizontalAlignment  = Alignment.CenterHorizontally,
-            verticalArrangement  = Arrangement.SpaceBetween
-        ) {
-
-            // ── Nút kết nối ──────────────────────────────────────────────────
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier         = Modifier.weight(0.5f)
-            ) {
-                ConnectButton(
-                    isConnected = isConnected,
-                    buttonColor = buttonColor,
-                    iconColor   = iconColor,
-                    onClick     = {
-                        when {
-                            parentingState.parentingEnabled && isConnected -> {
-                                blockedDialogMessage =
-                                    "Không thể tắt VShield Protection ở màn hình Home khi Parenting Mode đang bật.\n\n" +
-                                            "Nếu muốn thay đổi, hãy vào Settings > Parenting Control."
-                            }
-                            parentingState.parentingEnabled && !isConnected -> {
-                                blockedDialogMessage =
-                                    "Parenting Mode yêu cầu VShield Protection luôn ở trạng thái bật."
-                                onToggleClick()
-                            }
-                            else -> {
-                                val action = if (isConnected) ParentAction.ToggleProtectionOff
-                                else             ParentAction.ToggleProtectionOn
-                                gate.protect(action) { onToggleClick() }
-                            }
-                        }
-                    }
-                )
-            }
-
-            StatusText(isConnected)
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Tùy chọn bộ lọc ─────────────────────────────────────────────
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors   = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                )
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text       = "Tùy chọn chặn",
-                        style      = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    FilterSwitchRow(
-                        label          = "Web người lớn (Adult)",
-                        checked        = isAdultBlocked,
-                        onCheckedChange = { checked ->
-                            if (parentingState.parentingEnabled) {
-                                blockedDialogMessage =
-                                    "Không thể thay đổi bộ lọc Adult khi Parenting Mode đang bật.\n\n" +
-                                            "Hãy vào Settings và tắt Parenting Mode trước."
-                            } else {
-                                gate.protect(ParentAction.ChangeFilterConfig) {
-                                    isAdultBlocked = checked
-                                    handleSettingChange(context, checked, isGamblingBlocked)
-                                }
-                            }
-                        }
-                    )
-
-                    Divider(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        color    = Color.Gray.copy(alpha = 0.2f)
-                    )
-
-                    FilterSwitchRow(
-                        label          = "Cờ bạc (Gambling)",
-                        checked        = isGamblingBlocked,
-                        onCheckedChange = { checked ->
-                            if (parentingState.parentingEnabled) {
-                                blockedDialogMessage =
-                                    "Không thể thay đổi bộ lọc Gambling khi Parenting Mode đang bật.\n\n" +
-                                            "Hãy vào Settings và tắt Parenting Mode trước."
-                            } else {
-                                gate.protect(ParentAction.ChangeFilterConfig) {
-                                    isGamblingBlocked = checked
-                                    handleSettingChange(context, isAdultBlocked, checked)
-                                }
-                            }
-                        }
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.weight(0.1f))
-
-            // ── Thống kê ─────────────────────────────────────────────────────
-            StatsDashboard(
-                isConnected  = isConnected,
-                blockedCount = blockedCount
-            )
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper functions
-// ─────────────────────────────────────────────────────────────────────────────
-
-fun handleSettingChange(
-    context: Context,
-    blockAdult: Boolean,
-    blockGambling: Boolean
-) {
-    val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
-
-    // FIX LỖI 4: Dùng commit() thay vì apply().
-    // apply() là bất đồng bộ — nếu process bị kill ngay sau khi user đổi cài đặt,
-    // dữ liệu có thể chưa kịp ghi ra đĩa → mất cài đặt sau khi restart.
-    // commit() là đồng bộ, đảm bảo ghi xong hoàn toàn trước khi return.
-    // Vì thao tác này chỉ ghi 2 boolean (rất nhẹ), chi phí đồng bộ hoàn toàn chấp nhận được.
-    prefs.edit()
-        .putBoolean("BLOCK_ADULT",    blockAdult)
-        .putBoolean("BLOCK_GAMBLING", blockGambling)
-        .commit() // ← FIX: thay apply() bằng commit()
-
-    DomainBlacklist.blockAdult    = blockAdult
-    DomainBlacklist.blockGambling = blockGambling
-
-    val intent = Intent(context, VShieldVpnService::class.java).apply {
-        action = VShieldVpnService.ACTION_UPDATE_SETTINGS
-    }
-    context.startService(intent)
-
-    Toast.makeText(
-        context,
-        "Đã lưu cài đặt. Bộ lọc được cập nhật ngay lập tức.",
-        Toast.LENGTH_SHORT
-    ).show()
-}
-
-fun enforceParentingFilters(context: Context) {
-    val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
-
-    val currentAdult    = prefs.getBoolean("BLOCK_ADULT",    DomainBlacklist.blockAdult)
-    val currentGambling = prefs.getBoolean("BLOCK_GAMBLING", DomainBlacklist.blockGambling)
-
-    if (currentAdult && currentGambling) return
-
-    handleSettingChange(
-        context      = context,
-        blockAdult   = true,
-        blockGambling = true
-    )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// UI Components
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-fun FilterSwitchRow(
-    label: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier              = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment     = Alignment.CenterVertically
-    ) {
-        Text(text = label)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@Composable
-fun HomeTopBar(
-    isConnected: Boolean,
-    onSettingsClick: () -> Unit
-) {
-    Row(
-        modifier              = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment     = Alignment.CenterVertically
-    ) {
-        Column {
-            Text(
-                text       = "VShield Home",
-                style      = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text  = if (isConnected) "Đang bảo vệ" else "Đã tắt",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isConnected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.error
-            )
-        }
-        IconButton(onClick = onSettingsClick) {
-            Icon(imageVector = Icons.Outlined.Settings, contentDescription = "Settings")
-        }
-    }
-}
-
-@Composable
-fun ConnectButton(
-    isConnected: Boolean,
-    buttonColor: Color,
-    iconColor: Color,
-    onClick: () -> Unit
-) {
-    val scale by animateFloatAsState(
-        targetValue   = if (isConnected) 1.05f else 1.0f,
-        animationSpec = tween(300),
-        label         = "scale"
-    )
-
-    Box(
-        modifier = Modifier
-            .size(160.dp)
-            .scale(scale)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        buttonColor.copy(alpha = 0.8f),
-                        buttonColor
-                    )
-                )
-            )
-            .clickable { onClick() },
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector     = if (isConnected) Icons.Filled.Security
-            else Icons.Filled.PowerSettingsNew,
-            contentDescription = "Connect",
-            tint            = iconColor,
-            modifier        = Modifier.size(64.dp)
-        )
-    }
-}
-
-@Composable
-fun StatusText(isConnected: Boolean) {
-    Text(
-        text  = if (isConnected) "Hệ thống đang chạy ngầm" else "Nhấn nút để bắt đầu",
-        style = MaterialTheme.typography.bodyLarge,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-    )
-}
-
-@Composable
-fun StatsDashboard(
-    isConnected: Boolean,
-    blockedCount: String
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-        )
-    ) {
-        Row(
-            modifier              = Modifier
-                .padding(16.dp)
-                .fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceAround
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text       = blockedCount,
-                    style      = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color      = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text  = "Đã chặn",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ParentingBlockedDialog(
-    title: String = "Bị khóa bởi Parenting Mode",
-    message: String,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = {
-            Icon(
-                imageVector        = Icons.Default.Lock,
-                contentDescription = null,
-                tint               = MaterialTheme.colorScheme.primary
-            )
-        },
-        title = {
-            Text(
-                text       = title,
-                style      = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-        },
-        text = {
-            Text(
-                text  = message,
-                style = MaterialTheme.typography.bodyLarge
-            )
-        },
-        confirmButton = {
-            Button(onClick = onDismiss) { Text("Đã hiểu") }
-        }
-    )
-}
-
-========================================
 FILE: ./app/src/main/java/com/trustnet/vshield/ui/screen/SettingsScreen.kt
 ========================================
 
@@ -954,248 +518,6 @@ private fun SettingSwitchItem(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange
-        )
-    }
-}
-
-========================================
-FILE: ./app/src/main/java/com/trustnet/vshield/ui/screen/SplashScreen.kt
-========================================
-
-package com.trustnet.vshield.ui.screen
-
-import android.app.Application
-import android.util.Log
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
-import com.trustnet.vshield.core.DomainBlacklist
-import com.trustnet.vshield.data.local.SyncPreferences
-import com.trustnet.vshield.network.OnDeviceAi
-import com.trustnet.vshield.repository.BlocklistRepository
-import com.trustnet.vshield.repository.SyncResult
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
-class SplashViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val repo      = BlocklistRepository(application)
-    private val syncPrefs = SyncPreferences(application)
-
-    private val _isReady     = MutableStateFlow(false)
-    val isReady = _isReady.asStateFlow()
-
-    private val _progress    = MutableStateFlow(0f)
-    val progress = _progress.asStateFlow()
-
-    private val _statusText  = MutableStateFlow("Khởi động hệ thống...")
-    val statusText = _statusText.asStateFlow()
-
-    init {
-        startInitialization()
-    }
-
-    private fun startInitialization() {
-        viewModelScope.launch {
-
-            // FIX: Nếu lists đã được nạp sẵn vào RAM (service đang chạy, cùng process),
-            // KHÔNG khởi tạo lại. Lý do: gọi loadFromBinCache() lần thứ hai trong khi
-            // VPN đang xử lý traffic sẽ set lần lượt từng AtomicReference (phishing →
-            // adult → gambling → whitelist). Giữa các lần set đó, processPacket() chạy
-            // với filter cũ+mới lẫn lộn → cả blacklist lẫn whitelist hoạt động sai.
-            //
-            // Kịch bản này xảy ra khi: người dùng đóng app từ recents rồi mở lại,
-            // trong khi VPN service vẫn đang chạy trong nền.
-            if (DomainBlacklist.isListsReady()) {
-                Log.i("SplashVM", "Lists đã sẵn sàng (service đang chạy), bỏ qua init.")
-                _progress.value   = 1.0f
-                _statusText.value = "Hệ thống đang hoạt động"
-                _isReady.value    = true
-
-                // Vẫn chạy sync ngầm để cập nhật danh sách mới nhất
-                launch(Dispatchers.IO) {
-                    Log.i("SplashVM", "Sync ngầm (fast-path)...")
-                    val result = repo.sync()
-                    Log.i("SplashVM", "Sync ngầm hoàn tất: $result")
-                }
-                return@launch
-            }
-
-            // ── NHÁNH NHANH: Đã có .bin cache → vào app ngay (~50ms) ──────────────
-            if (DomainBlacklist.hasBinCache(getApplication())) {
-
-                _progress.value  = 0.1f
-                _statusText.value = "Đang nạp bộ lọc từ cache..."
-
-                val loadOk = withContext(Dispatchers.IO) {
-                    DomainBlacklist.loadFromBinCache(getApplication())
-                }
-
-                // Nếu .bin bị lỗi → fallback load từ DB.
-                // FIX LỖI 2: Dùng reloadFromDatabaseSync() thay vì init().
-                // init() là fire-and-forget (spawn coroutine rồi return ngay),
-                // withContext() không thực sự chờ filter nạp xong.
-                // reloadFromDatabaseSync() là suspend fun → withContext() chờ đúng cách.
-                if (!loadOk) {
-                    _statusText.value = "Cache lỗi, đang nạp từ dữ liệu cũ..."
-                    withContext(Dispatchers.IO) {
-                        DomainBlacklist.reloadFromDatabaseSync(getApplication()) // ← FIX: thay init()
-                    }
-                }
-
-                _progress.value  = 0.7f
-                _statusText.value = "Đang khởi động AI..."
-
-                withContext(Dispatchers.IO) {
-                    OnDeviceAi.init(getApplication())
-                }
-
-                _progress.value  = 1.0f
-                _statusText.value = "Hoàn tất!"
-                delay(400)
-
-                // Vào app ngay — không chờ sync
-                _isReady.value = true
-
-                // Sync delta ngầm — KHÔNG block UI
-                // FIX LỖI 1: repo.sync() đã được sửa để xử lý AlreadyUpToDate đúng cách
-                launch(Dispatchers.IO) {
-                    Log.i("SplashVM", "Bắt đầu sync ngầm sau khi vào app...")
-                    val result = repo.sync()
-                    Log.i("SplashVM", "Sync ngầm hoàn tất: $result")
-                }
-
-                return@launch
-            }
-
-            // ── NHÁNH CHẬM: Lần đầu cài — bắt buộc sync trước ───────────────────
-            _progress.value  = 0.05f
-            _statusText.value = "Lần đầu khởi động, đang tải dữ liệu..."
-
-            val maxRetry = 5
-            var retryCount = 0
-            var syncSuccess = false
-
-            while (!syncSuccess) {
-                val result = repo.syncWithProgress { p, text ->
-                    _progress.value  = p / 100f
-                    _statusText.value = text
-                }
-
-                when {
-                    // Sync thành công hoặc đã up-to-date
-                    // FIX LỖI 3: Cả hai trường hợp này giờ đã được xử lý đúng bởi
-                    // syncWithProgress() đã được sửa ở BlocklistRepository.
-                    // Không cần gọi thêm reloadFromDatabaseSync() hay init() ở đây nữa,
-                    // vì syncWithProgress() đã tự làm khi cần.
-                    result is SyncResult.Success ||
-                            result is SyncResult.AlreadyUpToDate -> {
-                        // Nếu vì lý do nào đó filter vẫn chưa nạp (fallback an toàn),
-                        // nạp trực tiếp từ DB.
-                        if (!DomainBlacklist.isListsReady()) {
-                            Log.w("SplashVM", "Sau sync, filter vẫn chưa ready — fallback reload DB...")
-                            withContext(Dispatchers.IO) {
-                                DomainBlacklist.reloadFromDatabaseSync(getApplication())
-                            }
-                        }
-                        syncSuccess = true
-                    }
-
-                    // Lỗi mạng — còn lần retry
-                    result is SyncResult.Error && retryCount < maxRetry -> {
-                        retryCount++
-                        _statusText.value =
-                            "Mạng yếu. Thử lại ($retryCount/$maxRetry)..."
-                        delay(2000)
-                    }
-
-                    // Hết retry — dùng assets bundled sẵn, vẫn cho vào app.
-                    // FIX LỖI 2: Dùng reloadFromDatabaseSync() thay vì init()
-                    // để withContext() thực sự chờ filter nạp xong.
-                    else -> {
-                        _statusText.value = "Không có mạng. Dùng dữ liệu mặc định..."
-                        withContext(Dispatchers.IO) {
-                            DomainBlacklist.reloadFromDatabaseSync(getApplication()) // ← FIX: thay init()
-                        }
-                        syncSuccess = true
-                    }
-                }
-            }
-
-            _progress.value  = 0.85f
-            _statusText.value = "Đang khởi động AI..."
-
-            withContext(Dispatchers.IO) {
-                OnDeviceAi.init(getApplication())
-            }
-
-            _progress.value  = 1.0f
-            _statusText.value = "Hoàn tất! Mở khóa hệ thống..."
-            delay(600)
-
-            _isReady.value = true
-        }
-    }
-}
-
-@Composable
-fun SplashScreen(
-    progress: Float,
-    statusText: String
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector        = Icons.Filled.Security,
-            contentDescription = "VShield",
-            modifier           = Modifier.size(80.dp),
-            tint               = MaterialTheme.colorScheme.primary
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text       = "VShield",
-            style      = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
-            color      = MaterialTheme.colorScheme.primary
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text  = statusText,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-        )
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        LinearProgressIndicator(
-            progress  = { progress },
-            modifier  = Modifier
-                .fillMaxWidth(0.7f)
-                .height(4.dp),
-            color      = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
         )
     }
 }
@@ -1783,6 +1105,684 @@ private fun formatCountdown(seconds: Int): String {
 }
 
 ========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/ui/screen/HomeScreen.kt
+========================================
+
+package com.trustnet.vshield.ui.screen
+
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.trustnet.vshield.VShieldVpnService
+import com.trustnet.vshield.core.DomainBlacklist
+import com.trustnet.vshield.parenting.ParentAction
+import com.trustnet.vshield.parenting.ParentingViewModel
+import com.trustnet.vshield.ui.parenting.LocalParentGate
+
+@Composable
+fun HomeScreen(
+    isConnected: Boolean,
+    blockedCount: String,
+    onToggleClick: () -> Unit,
+    onSettingsClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val gate    = LocalParentGate.current
+
+    val parentingVm: ParentingViewModel = viewModel()
+    val parentingState by parentingVm.uiState.collectAsState()
+
+    var isAdultBlocked    by remember { mutableStateOf(DomainBlacklist.blockAdult) }
+    var isGamblingBlocked by remember { mutableStateOf(DomainBlacklist.blockGambling) }
+    var blockedDialogMessage by rememberSaveable { mutableStateOf<String?>(null) }
+
+    blockedDialogMessage?.let { message ->
+        ParentingBlockedDialog(
+            message   = message,
+            onDismiss = { blockedDialogMessage = null }
+        )
+    }
+
+    LaunchedEffect(parentingState.parentingEnabled, isConnected) {
+        if (parentingState.parentingEnabled) {
+            if (!isAdultBlocked || !isGamblingBlocked) {
+                isAdultBlocked    = true
+                isGamblingBlocked = true
+                enforceParentingFilters(context)
+            }
+            if (!isConnected) {
+                onToggleClick()
+                Toast.makeText(
+                    context,
+                    "Parenting Mode đang bật nên VShield Protection được tự động bật.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    val backgroundColor by animateColorAsState(
+        targetValue   = if (isConnected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surface,
+        animationSpec = tween(500),
+        label         = "bgColor"
+    )
+
+    val buttonColor by animateColorAsState(
+        targetValue   = if (isConnected) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.secondaryContainer,
+        animationSpec = tween(500),
+        label         = "btnColor"
+    )
+
+    val iconColor by animateColorAsState(
+        targetValue   = if (isConnected) MaterialTheme.colorScheme.onPrimary
+        else MaterialTheme.colorScheme.onSecondaryContainer,
+        animationSpec = tween(500),
+        label         = "iconColor"
+    )
+
+    Scaffold(
+        containerColor = backgroundColor,
+        topBar = { HomeTopBar(isConnected, onSettingsClick) }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(16.dp),
+            horizontalAlignment  = Alignment.CenterHorizontally,
+            verticalArrangement  = Arrangement.SpaceBetween
+        ) {
+
+            // ── Nút kết nối ──────────────────────────────────────────────────
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier         = Modifier.weight(0.5f)
+            ) {
+                ConnectButton(
+                    isConnected = isConnected,
+                    buttonColor = buttonColor,
+                    iconColor   = iconColor,
+                    onClick     = {
+                        when {
+                            parentingState.parentingEnabled && isConnected -> {
+                                blockedDialogMessage =
+                                    "Không thể tắt VShield Protection ở màn hình Home khi Parenting Mode đang bật.\n\n" +
+                                            "Nếu muốn thay đổi, hãy vào Settings > Parenting Control."
+                            }
+                            parentingState.parentingEnabled && !isConnected -> {
+                                blockedDialogMessage =
+                                    "Parenting Mode yêu cầu VShield Protection luôn ở trạng thái bật."
+                                onToggleClick()
+                            }
+                            else -> {
+                                val action = if (isConnected) ParentAction.ToggleProtectionOff
+                                else             ParentAction.ToggleProtectionOn
+                                gate.protect(action) { onToggleClick() }
+                            }
+                        }
+                    }
+                )
+            }
+
+            StatusText(isConnected)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── Tùy chọn bộ lọc ─────────────────────────────────────────────
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors   = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text       = "Tùy chọn chặn",
+                        style      = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    FilterSwitchRow(
+                        label          = "Web người lớn (Adult)",
+                        checked        = isAdultBlocked,
+                        onCheckedChange = { checked ->
+                            if (parentingState.parentingEnabled) {
+                                blockedDialogMessage =
+                                    "Không thể thay đổi bộ lọc Adult khi Parenting Mode đang bật.\n\n" +
+                                            "Hãy vào Settings và tắt Parenting Mode trước."
+                            } else {
+                                gate.protect(ParentAction.ChangeFilterConfig) {
+                                    isAdultBlocked = checked
+                                    handleSettingChange(context, checked, isGamblingBlocked)
+                                }
+                            }
+                        }
+                    )
+
+                    Divider(
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color    = Color.Gray.copy(alpha = 0.2f)
+                    )
+
+                    FilterSwitchRow(
+                        label          = "Cờ bạc (Gambling)",
+                        checked        = isGamblingBlocked,
+                        onCheckedChange = { checked ->
+                            if (parentingState.parentingEnabled) {
+                                blockedDialogMessage =
+                                    "Không thể thay đổi bộ lọc Gambling khi Parenting Mode đang bật.\n\n" +
+                                            "Hãy vào Settings và tắt Parenting Mode trước."
+                            } else {
+                                gate.protect(ParentAction.ChangeFilterConfig) {
+                                    isGamblingBlocked = checked
+                                    handleSettingChange(context, isAdultBlocked, checked)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(0.1f))
+
+            // ── Thống kê ─────────────────────────────────────────────────────
+            StatsDashboard(
+                isConnected  = isConnected,
+                blockedCount = blockedCount
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper functions
+// ─────────────────────────────────────────────────────────────────────────────
+
+fun handleSettingChange(
+    context: Context,
+    blockAdult: Boolean,
+    blockGambling: Boolean
+) {
+    val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
+
+    // FIX LỖI 4: Dùng commit() thay vì apply().
+    // apply() là bất đồng bộ — nếu process bị kill ngay sau khi user đổi cài đặt,
+    // dữ liệu có thể chưa kịp ghi ra đĩa → mất cài đặt sau khi restart.
+    // commit() là đồng bộ, đảm bảo ghi xong hoàn toàn trước khi return.
+    // Vì thao tác này chỉ ghi 2 boolean (rất nhẹ), chi phí đồng bộ hoàn toàn chấp nhận được.
+    prefs.edit()
+        .putBoolean("BLOCK_ADULT",    blockAdult)
+        .putBoolean("BLOCK_GAMBLING", blockGambling)
+        .commit() // ← FIX: thay apply() bằng commit()
+
+    DomainBlacklist.blockAdult    = blockAdult
+    DomainBlacklist.blockGambling = blockGambling
+
+    val intent = Intent(context, VShieldVpnService::class.java).apply {
+        action = VShieldVpnService.ACTION_UPDATE_SETTINGS
+    }
+    context.startService(intent)
+
+    Toast.makeText(
+        context,
+        "Đã lưu cài đặt. Bộ lọc được cập nhật ngay lập tức.",
+        Toast.LENGTH_SHORT
+    ).show()
+}
+
+fun enforceParentingFilters(context: Context) {
+    val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
+
+    val currentAdult    = prefs.getBoolean("BLOCK_ADULT",    DomainBlacklist.blockAdult)
+    val currentGambling = prefs.getBoolean("BLOCK_GAMBLING", DomainBlacklist.blockGambling)
+
+    if (currentAdult && currentGambling) return
+
+    handleSettingChange(
+        context      = context,
+        blockAdult   = true,
+        blockGambling = true
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI Components
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+fun FilterSwitchRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Text(text = label)
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+fun HomeTopBar(
+    isConnected: Boolean,
+    onSettingsClick: () -> Unit
+) {
+    Row(
+        modifier              = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text       = "VShield Home",
+                style      = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text  = if (isConnected) "Đang bảo vệ" else "Đã tắt",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isConnected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error
+            )
+        }
+        IconButton(onClick = onSettingsClick) {
+            Icon(imageVector = Icons.Outlined.Settings, contentDescription = "Settings")
+        }
+    }
+}
+
+@Composable
+fun ConnectButton(
+    isConnected: Boolean,
+    buttonColor: Color,
+    iconColor: Color,
+    onClick: () -> Unit
+) {
+    val scale by animateFloatAsState(
+        targetValue   = if (isConnected) 1.05f else 1.0f,
+        animationSpec = tween(300),
+        label         = "scale"
+    )
+
+    Box(
+        modifier = Modifier
+            .size(160.dp)
+            .scale(scale)
+            .clip(CircleShape)
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        buttonColor.copy(alpha = 0.8f),
+                        buttonColor
+                    )
+                )
+            )
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector     = if (isConnected) Icons.Filled.Security
+            else Icons.Filled.PowerSettingsNew,
+            contentDescription = "Connect",
+            tint            = iconColor,
+            modifier        = Modifier.size(64.dp)
+        )
+    }
+}
+
+@Composable
+fun StatusText(isConnected: Boolean) {
+    Text(
+        text  = if (isConnected) "Hệ thống đang chạy ngầm" else "Nhấn nút để bắt đầu",
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+    )
+}
+
+@Composable
+fun StatsDashboard(
+    isConnected: Boolean,
+    blockedCount: String
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors   = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+        )
+    ) {
+        Row(
+            modifier              = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text       = blockedCount,
+                    style      = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color      = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text  = "Đã chặn",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ParentingBlockedDialog(
+    title: String = "Bị khóa bởi Parenting Mode",
+    message: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector        = Icons.Default.Lock,
+                contentDescription = null,
+                tint               = MaterialTheme.colorScheme.primary
+            )
+        },
+        title = {
+            Text(
+                text       = title,
+                style      = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Text(
+                text  = message,
+                style = MaterialTheme.typography.bodyLarge
+            )
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("Đã hiểu") }
+        }
+    )
+}
+
+========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/ui/screen/SplashScreen.kt
+========================================
+
+package com.trustnet.vshield.ui.screen
+
+import android.app.Application
+import android.util.Log
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.trustnet.vshield.core.DomainBlacklist
+import com.trustnet.vshield.data.local.SyncPreferences
+import com.trustnet.vshield.network.OnDeviceAi
+import com.trustnet.vshield.repository.BlocklistRepository
+import com.trustnet.vshield.repository.SyncResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class SplashViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val repo      = BlocklistRepository(application)
+    private val syncPrefs = SyncPreferences(application)
+
+    private val _isReady     = MutableStateFlow(false)
+    val isReady = _isReady.asStateFlow()
+
+    private val _progress    = MutableStateFlow(0f)
+    val progress = _progress.asStateFlow()
+
+    private val _statusText  = MutableStateFlow("Khởi động hệ thống...")
+    val statusText = _statusText.asStateFlow()
+
+    init {
+        startInitialization()
+    }
+
+    private fun startInitialization() {
+        viewModelScope.launch {
+
+            // FIX: Nếu lists đã được nạp sẵn vào RAM (service đang chạy, cùng process),
+            // KHÔNG khởi tạo lại. Lý do: gọi loadFromBinCache() lần thứ hai trong khi
+            // VPN đang xử lý traffic sẽ set lần lượt từng AtomicReference (phishing →
+            // adult → gambling → whitelist). Giữa các lần set đó, processPacket() chạy
+            // với filter cũ+mới lẫn lộn → cả blacklist lẫn whitelist hoạt động sai.
+            //
+            // Kịch bản này xảy ra khi: người dùng đóng app từ recents rồi mở lại,
+            // trong khi VPN service vẫn đang chạy trong nền.
+            if (DomainBlacklist.isListsReady()) {
+                Log.i("SplashVM", "Lists đã sẵn sàng (service đang chạy), bỏ qua init.")
+                _progress.value   = 1.0f
+                _statusText.value = "Hệ thống đang hoạt động"
+                _isReady.value    = true
+
+                // Vẫn chạy sync ngầm để cập nhật danh sách mới nhất
+                launch(Dispatchers.IO) {
+                    Log.i("SplashVM", "Sync ngầm (fast-path)...")
+                    val result = repo.sync()
+                    Log.i("SplashVM", "Sync ngầm hoàn tất: $result")
+                }
+                return@launch
+            }
+
+            // ── NHÁNH NHANH: Đã có .bin cache → vào app ngay (~50ms) ──────────────
+            if (DomainBlacklist.hasBinCache(getApplication())) {
+
+                _progress.value  = 0.1f
+                _statusText.value = "Đang nạp bộ lọc từ cache..."
+
+                val loadOk = withContext(Dispatchers.IO) {
+                    DomainBlacklist.loadFromBinCache(getApplication())
+                }
+
+                // Nếu .bin bị lỗi → fallback load từ DB.
+                // FIX LỖI 2: Dùng reloadFromDatabaseSync() thay vì init().
+                // init() là fire-and-forget (spawn coroutine rồi return ngay),
+                // withContext() không thực sự chờ filter nạp xong.
+                // reloadFromDatabaseSync() là suspend fun → withContext() chờ đúng cách.
+                if (!loadOk) {
+                    _statusText.value = "Cache lỗi, đang nạp từ dữ liệu cũ..."
+                    withContext(Dispatchers.IO) {
+                        DomainBlacklist.reloadFromDatabaseSync(getApplication()) // ← FIX: thay init()
+                    }
+                }
+
+                _progress.value  = 0.7f
+                _statusText.value = "Đang khởi động AI..."
+
+                withContext(Dispatchers.IO) {
+                    OnDeviceAi.init(getApplication())
+                }
+
+                _progress.value  = 1.0f
+                _statusText.value = "Hoàn tất!"
+                delay(400)
+
+                // Vào app ngay — không chờ sync
+                _isReady.value = true
+
+                // Sync delta ngầm — KHÔNG block UI
+                // FIX LỖI 1: repo.sync() đã được sửa để xử lý AlreadyUpToDate đúng cách
+                launch(Dispatchers.IO) {
+                    Log.i("SplashVM", "Bắt đầu sync ngầm sau khi vào app...")
+                    val result = repo.sync()
+                    Log.i("SplashVM", "Sync ngầm hoàn tất: $result")
+                }
+
+                return@launch
+            }
+
+            // ── NHÁNH CHẬM: Lần đầu cài — bắt buộc sync trước ───────────────────
+            _progress.value  = 0.05f
+            _statusText.value = "Lần đầu khởi động, đang tải dữ liệu..."
+
+            val maxRetry = 5
+            var retryCount = 0
+            var syncSuccess = false
+
+            while (!syncSuccess) {
+                val result = repo.syncWithProgress { p, text ->
+                    _progress.value  = p / 100f
+                    _statusText.value = text
+                }
+
+                when {
+                    // Sync thành công hoặc đã up-to-date
+                    // FIX LỖI 3: Cả hai trường hợp này giờ đã được xử lý đúng bởi
+                    // syncWithProgress() đã được sửa ở BlocklistRepository.
+                    // Không cần gọi thêm reloadFromDatabaseSync() hay init() ở đây nữa,
+                    // vì syncWithProgress() đã tự làm khi cần.
+                    result is SyncResult.Success ||
+                            result is SyncResult.AlreadyUpToDate -> {
+                        // Nếu vì lý do nào đó filter vẫn chưa nạp (fallback an toàn),
+                        // nạp trực tiếp từ DB.
+                        if (!DomainBlacklist.isListsReady()) {
+                            Log.w("SplashVM", "Sau sync, filter vẫn chưa ready — fallback reload DB...")
+                            withContext(Dispatchers.IO) {
+                                DomainBlacklist.reloadFromDatabaseSync(getApplication())
+                            }
+                        }
+                        syncSuccess = true
+                    }
+
+                    // Lỗi mạng — còn lần retry
+                    result is SyncResult.Error && retryCount < maxRetry -> {
+                        retryCount++
+                        _statusText.value =
+                            "Mạng yếu. Thử lại ($retryCount/$maxRetry)..."
+                        delay(2000)
+                    }
+
+                    // Hết retry — dùng assets bundled sẵn, vẫn cho vào app.
+                    // FIX LỖI 2: Dùng reloadFromDatabaseSync() thay vì init()
+                    // để withContext() thực sự chờ filter nạp xong.
+                    else -> {
+                        _statusText.value = "Không có mạng. Dùng dữ liệu mặc định..."
+                        withContext(Dispatchers.IO) {
+                            DomainBlacklist.reloadFromDatabaseSync(getApplication()) // ← FIX: thay init()
+                        }
+                        syncSuccess = true
+                    }
+                }
+            }
+
+            _progress.value  = 0.85f
+            _statusText.value = "Đang khởi động AI..."
+
+            withContext(Dispatchers.IO) {
+                OnDeviceAi.init(getApplication())
+            }
+
+            _progress.value  = 1.0f
+            _statusText.value = "Hoàn tất! Mở khóa hệ thống..."
+            delay(600)
+
+            _isReady.value = true
+        }
+    }
+}
+
+@Composable
+fun SplashScreen(
+    progress: Float,
+    statusText: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector        = Icons.Filled.Security,
+            contentDescription = "VShield",
+            modifier           = Modifier.size(80.dp),
+            tint               = MaterialTheme.colorScheme.primary
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text       = "VShield",
+            style      = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold,
+            color      = MaterialTheme.colorScheme.primary
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text  = statusText,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        LinearProgressIndicator(
+            progress  = { progress },
+            modifier  = Modifier
+                .fillMaxWidth(0.7f)
+                .height(4.dp),
+            color      = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+        )
+    }
+}
+
+========================================
 FILE: ./app/src/main/java/com/trustnet/vshield/ui/parenting/ParentAuthDialog.kt
 ========================================
 
@@ -2277,552 +2277,6 @@ object VpnStats {
 
 
 ========================================
-FILE: ./app/src/main/java/com/trustnet/vshield/core/BloomFilter.kt
-========================================
-
-package com.trustnet.vshield.core
-
-import java.util.BitSet
-import kotlin.math.ln
-import kotlin.math.roundToInt
-
-class BloomFilter private constructor(
-    private val bitSize: Int,
-    private val numHashFunctions: Int
-) {
-    private val bits = BitSet(bitSize)
-
-    // Đếm số phần tử đã add — dùng để lưu metadata .bin
-    private var insertedCount: Int = 0
-
-    fun add(value: String) {
-        val (h1, h2) = hashPair(value)
-        for (i in 0 until numHashFunctions) {
-            val idx = positiveMod(h1 + i * h2, bitSize)
-            bits.set(idx)
-        }
-        insertedCount++
-    }
-
-    fun mightContain(value: String): Boolean {
-        val (h1, h2) = hashPair(value)
-        for (i in 0 until numHashFunctions) {
-            val idx = positiveMod(h1 + i * h2, bitSize)
-            if (!bits.get(idx)) return false
-        }
-        return true
-    }
-
-    fun elementCount(): Int = insertedCount
-
-    fun toByteArray(): ByteArray = bits.toByteArray()
-
-    private fun positiveMod(x: Int, m: Int): Int {
-        val r = x % m
-        return if (r < 0) r + m else r
-    }
-
-    private fun hashPair(s: String): Pair<Int, Int> {
-        val b = s.toByteArray(Charsets.UTF_8)
-        val h1 = murmur3_32(b, seed = 0x9747b28c.toInt())
-        val h2 = murmur3_32(b, seed = 0x1b873593)
-        return h1 to (if (h2 == 0) 0x5bd1e995 else h2)
-    }
-
-    companion object {
-        fun create(expectedInsertions: Int, falsePositiveRate: Double = 0.0000001): BloomFilter {
-            val n = expectedInsertions.coerceAtLeast(1)
-            val p = falsePositiveRate.coerceIn(1e-9, 0.5)
-            val m = (-(n * ln(p)) / (ln(2.0) * ln(2.0))).roundToInt().coerceAtLeast(64)
-            val k = ((m.toDouble() / n) * ln(2.0)).roundToInt().coerceIn(1, 30)
-            return BloomFilter(m, k)
-        }
-
-        fun loadFromByteArray(
-            data: ByteArray,
-            expectedInsertions: Int,
-            falsePositiveRate: Double = 0.0000001
-        ): BloomFilter {
-            val n = expectedInsertions.coerceAtLeast(1)
-            val p = falsePositiveRate.coerceIn(1e-9, 0.5)
-            val m = (-(n * ln(p)) / (ln(2.0) * ln(2.0))).roundToInt().coerceAtLeast(64)
-            val k = ((m.toDouble() / n) * ln(2.0)).roundToInt().coerceIn(1, 30)
-
-            val filter = BloomFilter(m, k)
-            filter.bits.clear()
-            val loadedBits = BitSet.valueOf(data)
-            filter.bits.or(loadedBits)
-            // insertedCount giữ nguyên 0 khi load từ .bin
-            // (chỉ dùng elementCount() sau khi add(), không cần thiết sau load)
-            return filter
-        }
-
-        fun empty(): BloomFilter = BloomFilter(64, 1)
-
-        private fun murmur3_32(data: ByteArray, seed: Int): Int {
-            var h1 = seed
-            val c1 = 0xcc9e2d51.toInt()
-            val c2 = 0x1b873593
-
-            var i = 0
-            while (i + 3 < data.size) {
-                var k1 = (data[i].toInt() and 0xff) or
-                        ((data[i + 1].toInt() and 0xff) shl 8) or
-                        ((data[i + 2].toInt() and 0xff) shl 16) or
-                        ((data[i + 3].toInt() and 0xff) shl 24)
-
-                k1 *= c1
-                k1 = (k1 shl 15) or (k1 ushr 17)
-                k1 *= c2
-
-                h1 = h1 xor k1
-                h1 = (h1 shl 13) or (h1 ushr 19)
-                h1 = h1 * 5 + 0xe6546b64.toInt()
-                i += 4
-            }
-
-            var k1 = 0
-            val remaining = data.size - i
-            if (remaining == 3) k1 = k1 xor ((data[i + 2].toInt() and 0xff) shl 16)
-            if (remaining >= 2) k1 = k1 xor ((data[i + 1].toInt() and 0xff) shl 8)
-            if (remaining >= 1) {
-                k1 = k1 xor (data[i].toInt() and 0xff)
-                k1 *= c1
-                k1 = (k1 shl 15) or (k1 ushr 17)
-                k1 *= c2
-                h1 = h1 xor k1
-            }
-
-            h1 = h1 xor data.size
-            h1 = h1 xor (h1 ushr 16)
-            h1 *= 0x85ebca6b.toInt()
-            h1 = h1 xor (h1 ushr 13)
-            h1 *= 0xc2b2ae35.toInt()
-            h1 = h1 xor (h1 ushr 16)
-            return h1
-        }
-    }
-}
-
-========================================
-FILE: ./app/src/main/java/com/trustnet/vshield/core/DomainBlackList.kt
-========================================
-
-package com.trustnet.vshield.core
-
-import android.content.Context
-import android.util.Log
-import com.trustnet.vshield.data.local.VShieldDatabase
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.io.File
-import java.util.Locale
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicReference
-
-object DomainBlacklist {
-
-    private const val TAG = "DomainBlacklist"
-
-    // Assets fallback
-    private const val FILE_PHISHING  = "blacklist_phishing.txt"
-    private const val FILE_ADULT     = "blacklist_adult.txt"
-    private const val FILE_GAMBLING  = "blacklist_gambling.txt"
-    private const val FILE_WHITELIST = "whitelist.txt"
-
-    // File .bin cache trong filesDir
-    private const val BIN_PHISHING  = "filter_phishing.bin"
-    private const val BIN_ADULT     = "filter_adult.bin"
-    private const val BIN_GAMBLING  = "filter_gambling.bin"
-    private const val BIN_WHITELIST = "filter_whitelist.bin"
-    private const val BIN_META      = "filter_meta.json"
-
-    @Volatile var blockAdult: Boolean    = true
-    @Volatile var blockGambling: Boolean = true
-
-    // FIX CORE: Gộp cả 4 filter vào một data class, dùng MỘT AtomicReference duy nhất.
-    //
-    // Vấn đề cũ: 4 AtomicReference riêng lẻ → khi reload, set tuần tự
-    //   phishing → adult → gambling → whitelist.
-    //   processPacket() chạy song song sẽ thấy trạng thái hỗn độn
-    //   (filter cũ lẫn mới, hoặc một số null) trong khoảng giữa các lần set.
-    //
-    // Fix mới: filterSet.set(newFilterSet) là MỘT thao tác atomic.
-    //   processPacket() gọi filterSet.get() MỘT LẦN → nhận snapshot nhất quán.
-    //   Không bao giờ thấy trạng thái trung gian.
-    private data class FilterSet(
-        val phishing:  BloomFilter,
-        val adult:     BloomFilter,
-        val gambling:  BloomFilter,
-        val whitelist: BloomFilter,
-    )
-    private val filterSet = AtomicReference<FilterSet?>()
-
-    private val tempWhitelist = ConcurrentHashMap<String, Long>()
-
-    @Volatile private var initialized = false
-
-    // listsReady = true khi filterSet đã được set với dữ liệu thực
-    @Volatile private var listsReady = false
-
-    enum class BlockCategory { PHISHING, ADULT, GAMBLING, WHITELIST, NONE }
-
-    data class BlockMatch(
-        val category: BlockCategory,
-        val matchDomain: String,
-    )
-
-    private val common2LevelPublicSuffixPrefixes = setOf(
-        "co", "com", "net", "org", "gov", "edu", "ac"
-    )
-
-    private data class BinMeta(
-        val phishingCount:  Int = 100_000,
-        val adultCount:     Int = 50_000,
-        val gamblingCount:  Int = 50_000,
-        val whitelistCount: Int = 250_000,
-    )
-
-    // ── PUBLIC API ────────────────────────────────────────────────────────────
-
-    fun isListsReady(): Boolean = listsReady
-
-    fun hasBinCache(context: Context): Boolean {
-        return listOf(BIN_PHISHING, BIN_ADULT, BIN_GAMBLING, BIN_WHITELIST, BIN_META)
-            .all { File(context.filesDir, it).exists() }
-    }
-
-    /**
-     * Load từ .bin cache — nhanh (~50ms).
-     * FIX: Build cả 4 filter xong mới swap atomic một lần duy nhất.
-     */
-    fun loadFromBinCache(context: Context): Boolean {
-        return try {
-            val meta = readMeta(context)
-
-            // Build tất cả 4 filter trong bộ nhớ trước
-            val pFilter = BloomFilter.loadFromByteArray(
-                File(context.filesDir, BIN_PHISHING).readBytes(), meta.phishingCount
-            )
-            val aFilter = BloomFilter.loadFromByteArray(
-                File(context.filesDir, BIN_ADULT).readBytes(), meta.adultCount
-            )
-            val gFilter = BloomFilter.loadFromByteArray(
-                File(context.filesDir, BIN_GAMBLING).readBytes(), meta.gamblingCount
-            )
-            val wFilter = BloomFilter.loadFromByteArray(
-                File(context.filesDir, BIN_WHITELIST).readBytes(), meta.whitelistCount
-            )
-
-            // MỘT thao tác atomic — processPacket() không bao giờ thấy trạng thái trung gian
-            filterSet.set(FilterSet(pFilter, aFilter, gFilter, wFilter))
-            initialized = true
-            listsReady  = true
-
-            Log.i(TAG, "Load .bin thành công: " +
-                    "phishing=${meta.phishingCount}, adult=${meta.adultCount}, " +
-                    "gambling=${meta.gamblingCount}, whitelist=${meta.whitelistCount}")
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "Load .bin thất bại, sẽ fallback DB: ${e.message}")
-            false
-        }
-    }
-
-    fun saveToBinCache(context: Context) {
-        val fs = filterSet.get() ?: return
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                File(context.filesDir, BIN_PHISHING).writeBytes(fs.phishing.toByteArray())
-                File(context.filesDir, BIN_ADULT).writeBytes(fs.adult.toByteArray())
-                File(context.filesDir, BIN_GAMBLING).writeBytes(fs.gambling.toByteArray())
-                File(context.filesDir, BIN_WHITELIST).writeBytes(fs.whitelist.toByteArray())
-
-                saveMeta(context, BinMeta(
-                    phishingCount  = fs.phishing.elementCount(),
-                    adultCount     = fs.adult.elementCount(),
-                    gamblingCount  = fs.gambling.elementCount(),
-                    whitelistCount = fs.whitelist.elementCount(),
-                ))
-                Log.i(TAG, "Lưu .bin cache thành công")
-            } catch (e: Exception) {
-                Log.w(TAG, "Lưu .bin thất bại: ${e.message}")
-            }
-        }
-    }
-
-    fun clearBinCache(context: Context) {
-        listOf(BIN_PHISHING, BIN_ADULT, BIN_GAMBLING, BIN_WHITELIST, BIN_META)
-            .forEach { File(context.filesDir, it).delete() }
-        Log.i(TAG, "Đã xóa .bin cache")
-    }
-
-    /**
-     * Khởi tạo lần đầu từ DB / Assets (khi không có .bin).
-     * FIX: listsReady chỉ set bên trong coroutine, sau khi filterSet.set() xong.
-     */
-    fun init(context: Context) {
-        if (initialized) return
-        initialized = true
-
-        CoroutineScope(Dispatchers.IO).launch {
-            buildAndSwapFilters(context)
-            listsReady = true
-            Log.i(TAG, "DomainBlacklist init xong")
-        }
-    }
-
-    /**
-     * Reload sau khi sync server xong — atomic swap, không race.
-     */
-    fun reloadFromDatabase(context: Context) {
-        CoroutineScope(Dispatchers.IO).launch {
-            buildAndSwapFilters(context)
-            listsReady = true
-            Log.i(TAG, "Reload BloomFilters xong")
-        }
-    }
-
-    suspend fun reloadFromDatabaseSync(context: Context) {
-        withContext(Dispatchers.IO) {
-            buildAndSwapFilters(context)
-        }
-        listsReady = true
-        Log.i(TAG, "Reload BloomFilters xong (sync)")
-    }
-
-    // ── PUBLIC API — Matching ─────────────────────────────────────────────────
-
-    fun getBlockCategory(domain: String): BlockCategory =
-        match(domain)?.category ?: BlockCategory.NONE
-
-    fun match(domain: String): BlockMatch? {
-        val clean      = normalizeDomain(domain) ?: return null
-        val candidates = domainCandidates(clean)
-
-        // 1. Temp whitelist (bypass tạm)
-        val now = System.currentTimeMillis()
-        for (c in candidates) {
-            val expiry = tempWhitelist[c]
-            if (expiry != null) {
-                if (now < expiry) return BlockMatch(BlockCategory.WHITELIST, c)
-                tempWhitelist.remove(c)
-            }
-        }
-
-        // FIX: Lấy snapshot toàn bộ FilterSet MỘT LẦN — nhất quán 100%
-        // Nếu null (chưa load xong) → trả về null → caller xử lý là NONE
-        val fs = filterSet.get() ?: return null
-
-        // 2. Whitelist BloomFilter
-        for (c in candidates) {
-            if (fs.whitelist.mightContain(c)) {
-                Log.d(TAG, "ALLOW by whitelist: $c (query=$clean)")
-                return BlockMatch(BlockCategory.WHITELIST, c)
-            }
-        }
-
-        // 3. Phishing
-        for (c in candidates) {
-            if (fs.phishing.mightContain(c)) {
-                Log.w(TAG, "BLOCKED [Phishing]: $c (query=$clean)")
-                return BlockMatch(BlockCategory.PHISHING, c)
-            }
-        }
-
-        // 4. Adult
-        if (blockAdult) {
-            for (c in candidates) {
-                if (fs.adult.mightContain(c)) {
-                    Log.w(TAG, "BLOCKED [Adult]: $c (query=$clean)")
-                    return BlockMatch(BlockCategory.ADULT, c)
-                }
-            }
-        }
-
-        // 5. Gambling
-        if (blockGambling) {
-            for (c in candidates) {
-                if (fs.gambling.mightContain(c)) {
-                    Log.w(TAG, "BLOCKED [Gambling]: $c (query=$clean)")
-                    return BlockMatch(BlockCategory.GAMBLING, c)
-                }
-            }
-        }
-
-        return null
-    }
-
-    fun isBlocked(domain: String): Boolean {
-        val cat = getBlockCategory(domain)
-        return cat == BlockCategory.PHISHING ||
-                cat == BlockCategory.ADULT   ||
-                cat == BlockCategory.GAMBLING
-    }
-
-    fun addTemporaryAllow(domain: String) {
-        val clean = normalizeDomain(domain) ?: return
-        val candidates = domainCandidates(clean)
-        val expiry = System.currentTimeMillis() + 300_000L
-        candidates.forEach { tempWhitelist[it] = expiry }
-        Log.i(TAG, "Bypass tạm 5 phút: $clean")
-    }
-
-    // ── PRIVATE — Core load logic ─────────────────────────────────────────────
-
-    /**
-     * Build cả 4 filter hoàn chỉnh, sau đó swap atomic một lần.
-     * Không bao giờ để filterSet ở trạng thái trung gian.
-     */
-    private suspend fun buildAndSwapFilters(context: Context) {
-        val newFilterSet = FilterSet(
-            phishing  = buildBlacklistFilter(context, "phishing", FILE_PHISHING, 100_000),
-            adult     = buildBlacklistFilter(context, "adult",    FILE_ADULT,    50_000),
-            gambling  = buildBlacklistFilter(context, "gambling", FILE_GAMBLING, 50_000),
-            whitelist = buildWhitelistFilter(context),
-        )
-        // MỘT swap atomic duy nhất — processPacket() không bao giờ thấy trạng thái trung gian
-        filterSet.set(newFilterSet)
-    }
-
-    private suspend fun buildBlacklistFilter(
-        context: Context,
-        category: String,
-        assetFile: String,
-        defaultSize: Int,
-    ): BloomFilter {
-        return try {
-            val db  = VShieldDatabase.getInstance(context)
-            val dao = db.blocklistDao()
-            val domains = dao.getActiveDomainsByCategory(category)
-            if (domains.isEmpty()) throw Exception("DB trống cho category=$category")
-            Log.i(TAG, "Blacklist $category từ DB: ${domains.size} domains")
-            buildFilter(domains, maxOf(defaultSize, domains.size))
-        } catch (e: Exception) {
-            Log.w(TAG, "Load DB $category fail, fallback assets: ${e.message}")
-            loadFile(context, assetFile, defaultSize)
-        }
-    }
-
-    private suspend fun buildWhitelistFilter(context: Context): BloomFilter {
-        val db           = VShieldDatabase.getInstance(context)
-        val whitelistDao = db.whitelistDao()
-
-        return try {
-            val dbWhitelist     = whitelistDao.getAllDomains().mapNotNull { normalizeDomain(it) }
-            val staticWhitelist = loadStaticWhitelistList(context)
-
-            val merged = LinkedHashSet<String>(staticWhitelist.size + dbWhitelist.size)
-            merged.addAll(staticWhitelist)
-            merged.addAll(dbWhitelist)
-
-            Log.i(TAG, "Whitelist: total=${merged.size}")
-            buildFilter(merged.toList(), maxOf(merged.size, 250_000))
-        } catch (e: Exception) {
-            Log.w(TAG, "Load whitelist DB fail, fallback assets only: ${e.message}")
-            val staticWhitelist = loadStaticWhitelistList(context)
-            buildFilter(staticWhitelist, maxOf(staticWhitelist.size, 50_000))
-        }
-    }
-
-    private fun loadStaticWhitelistList(context: Context): List<String> {
-        val out = ArrayList<String>()
-        try {
-            context.assets.open(FILE_WHITELIST).bufferedReader().useLines { lines ->
-                lines.forEach { line -> normalizeDomain(line)?.let { out.add(it) } }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Không tìm thấy assets/$FILE_WHITELIST: ${e.message}")
-        }
-        out.addAll(listOf(
-            "google.com", "android.com", "gstatic.com",
-            "googleapis.com", "play.google.com", "accounts.google.com"
-        ))
-        return out.distinct()
-    }
-
-    private fun loadFile(context: Context, fileName: String, size: Int): BloomFilter {
-        val filter = BloomFilter.create(expectedInsertions = size, falsePositiveRate = 0.0000001)
-        try {
-            context.assets.open(fileName).bufferedReader().useLines { lines ->
-                lines.forEach { line -> normalizeDomain(line)?.let { filter.add(it) } }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Không tìm thấy assets/$fileName: ${e.message}")
-        }
-        return filter
-    }
-
-    private fun buildFilter(domains: List<String>, size: Int): BloomFilter {
-        val filter = BloomFilter.create(expectedInsertions = size, falsePositiveRate = 0.0000001)
-        domains.forEach { d -> normalizeDomain(d)?.let { filter.add(it) } }
-        return filter
-    }
-
-    // ── PRIVATE — Metadata .bin ───────────────────────────────────────────────
-
-    private fun saveMeta(context: Context, meta: BinMeta) {
-        val json = JSONObject().apply {
-            put("phishingCount",  meta.phishingCount)
-            put("adultCount",     meta.adultCount)
-            put("gamblingCount",  meta.gamblingCount)
-            put("whitelistCount", meta.whitelistCount)
-        }
-        File(context.filesDir, BIN_META).writeText(json.toString())
-    }
-
-    private fun readMeta(context: Context): BinMeta {
-        return try {
-            val json = JSONObject(File(context.filesDir, BIN_META).readText())
-            BinMeta(
-                phishingCount  = json.optInt("phishingCount",  100_000),
-                adultCount     = json.optInt("adultCount",     50_000),
-                gamblingCount  = json.optInt("gamblingCount",  50_000),
-                whitelistCount = json.optInt("whitelistCount", 250_000),
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Đọc meta thất bại, dùng default: ${e.message}")
-            BinMeta()
-        }
-    }
-
-    // ── PRIVATE — Domain helpers ──────────────────────────────────────────────
-
-    private fun domainCandidates(cleanDomain: String): List<String> {
-        val parts = cleanDomain.split('.')
-        if (parts.size <= 2) return listOf(cleanDomain)
-
-        val out = ArrayList<String>(parts.size)
-        for (i in 0..(parts.size - 2)) {
-            val candidateParts = parts.subList(i, parts.size)
-            if (candidateParts.size < 2) continue
-            if (candidateParts.size == 2) {
-                val left  = candidateParts[0]
-                val right = candidateParts[1]
-                if (right.length == 2 && left in common2LevelPublicSuffixPrefixes) continue
-            }
-            out.add(candidateParts.joinToString("."))
-        }
-        if (out.isEmpty()) out.add(cleanDomain)
-        return out
-    }
-
-    private fun normalizeDomain(raw: String): String? {
-        if (raw.trim().startsWith("#") || raw.isBlank()) return null
-        var s = raw.trim().lowercase(Locale.ROOT)
-        if (s.contains("://")) s = s.substringAfter("://")
-        if (s.contains("/"))   s = s.substringBefore("/")
-        if (s.contains(":"))   s = s.substringBefore(":")
-        s = s.removePrefix("*.").removePrefix("www.").trimEnd('.')
-        if (s.length < 3 || !s.contains(".")) return null
-        return s
-    }
-}
-
-========================================
 FILE: ./app/src/main/java/com/trustnet/vshield/core/BlockedDomainLog.kt
 ========================================
 
@@ -2912,6 +2366,498 @@ object BlockedDomainLog {
     /** Publish list mới nhất — reversed() để entry mới nhất lên đầu */
     private fun publish() {
         _entries.value = map.values.reversed().toList()
+    }
+}
+
+========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/core/BloomFilter.kt
+========================================
+
+package com.trustnet.vshield.core
+
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.util.BitSet
+import kotlin.math.ln
+import kotlin.math.roundToInt
+
+class BloomFilter private constructor(
+    private val bitSize: Int,
+    private val numHashFunctions: Int
+) {
+    private val bits = BitSet(bitSize)
+    private var insertedCount: Int = 0
+
+    fun add(value: String) {
+        val (h1, h2) = hashPair(value)
+        for (i in 0 until numHashFunctions) {
+            val idx = positiveMod(h1 + i * h2, bitSize)
+            bits.set(idx)
+        }
+        insertedCount++
+    }
+
+    fun mightContain(value: String): Boolean {
+        val (h1, h2) = hashPair(value)
+        for (i in 0 until numHashFunctions) {
+            val idx = positiveMod(h1 + i * h2, bitSize)
+            if (!bits.get(idx)) return false
+        }
+        return true
+    }
+
+    fun elementCount(): Int = insertedCount
+
+    /**
+     * Serialize to byte array: [bitSize (int), numHashFunctions (int), bits.toByteArray()]
+     */
+    fun toBytes(): ByteArray {
+        val baos = ByteArrayOutputStream()
+        DataOutputStream(baos).use { dos ->
+            dos.writeInt(bitSize)
+            dos.writeInt(numHashFunctions)
+            val bitsBytes = bits.toByteArray()
+            dos.writeInt(bitsBytes.size)
+            dos.write(bitsBytes)
+        }
+        return baos.toByteArray()
+    }
+
+    companion object {
+        fun create(expectedInsertions: Int, falsePositiveRate: Double = 0.0000001): BloomFilter {
+            val n = expectedInsertions.coerceAtLeast(1)
+            val p = falsePositiveRate.coerceIn(1e-9, 0.5)
+            val m = (-(n * ln(p)) / (ln(2.0) * ln(2.0))).roundToInt().coerceAtLeast(64)
+            val k = ((m.toDouble() / n) * ln(2.0)).roundToInt().coerceIn(1, 30)
+            return BloomFilter(m, k)
+        }
+
+        fun fromBytes(bytes: ByteArray): BloomFilter {
+            ByteArrayInputStream(bytes).use { bais ->
+                DataInputStream(bais).use { dis ->
+                    val bitSize = dis.readInt()
+                    val numHashFunctions = dis.readInt()
+                    val bitsLength = dis.readInt()
+                    val bitsBytes = ByteArray(bitsLength)
+                    dis.readFully(bitsBytes)
+
+                    val filter = BloomFilter(bitSize, numHashFunctions)
+                    filter.bits.clear()
+                    filter.bits.or(BitSet.valueOf(bitsBytes))
+                    // insertedCount giữ nguyên 0 (không cần thiết)
+                    return filter
+                }
+            }
+        }
+
+        fun empty(): BloomFilter = BloomFilter(64, 1)
+
+        private fun positiveMod(x: Int, m: Int): Int {
+            val r = x % m
+            return if (r < 0) r + m else r
+        }
+
+        private fun hashPair(s: String): Pair<Int, Int> {
+            val b = s.toByteArray(Charsets.UTF_8)
+            val h1 = murmur3_32(b, seed = 0x9747b28c.toInt())
+            val h2 = murmur3_32(b, seed = 0x1b873593)
+            return h1 to (if (h2 == 0) 0x5bd1e995 else h2)
+        }
+
+        private fun murmur3_32(data: ByteArray, seed: Int): Int {
+            var h1 = seed
+            val c1 = 0xcc9e2d51.toInt()
+            val c2 = 0x1b873593
+
+            var i = 0
+            while (i + 3 < data.size) {
+                var k1 = (data[i].toInt() and 0xff) or
+                        ((data[i + 1].toInt() and 0xff) shl 8) or
+                        ((data[i + 2].toInt() and 0xff) shl 16) or
+                        ((data[i + 3].toInt() and 0xff) shl 24)
+
+                k1 *= c1
+                k1 = (k1 shl 15) or (k1 ushr 17)
+                k1 *= c2
+
+                h1 = h1 xor k1
+                h1 = (h1 shl 13) or (h1 ushr 19)
+                h1 = h1 * 5 + 0xe6546b64.toInt()
+                i += 4
+            }
+
+            var k1 = 0
+            val remaining = data.size - i
+            if (remaining == 3) k1 = k1 xor ((data[i + 2].toInt() and 0xff) shl 16)
+            if (remaining >= 2) k1 = k1 xor ((data[i + 1].toInt() and 0xff) shl 8)
+            if (remaining >= 1) {
+                k1 = k1 xor (data[i].toInt() and 0xff)
+                k1 *= c1
+                k1 = (k1 shl 15) or (k1 ushr 17)
+                k1 *= c2
+                h1 = h1 xor k1
+            }
+
+            h1 = h1 xor data.size
+            h1 = h1 xor (h1 ushr 16)
+            h1 *= 0x85ebca6b.toInt()
+            h1 = h1 xor (h1 ushr 13)
+            h1 *= 0xc2b2ae35.toInt()
+            h1 = h1 xor (h1 ushr 16)
+            return h1
+        }
+    }
+}
+
+========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/core/DomainBlackList.kt
+========================================
+
+package com.trustnet.vshield.core
+
+import android.content.Context
+import android.util.Log
+import com.trustnet.vshield.data.local.VShieldDatabase
+import kotlinx.coroutines.*
+import java.io.File
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
+
+object DomainBlacklist {
+
+    private const val TAG = "DomainBlacklist"
+
+    // Assets fallback
+    private const val FILE_PHISHING  = "blacklist_phishing.txt"
+    private const val FILE_ADULT     = "blacklist_adult.txt"
+    private const val FILE_GAMBLING  = "blacklist_gambling.txt"
+    private const val FILE_WHITELIST = "whitelist.txt"
+
+    // File .bin cache trong filesDir
+    private const val BIN_PHISHING  = "filter_phishing.bin"
+    private const val BIN_ADULT     = "filter_adult.bin"
+    private const val BIN_GAMBLING  = "filter_gambling.bin"
+    private const val BIN_WHITELIST = "filter_whitelist.bin"
+    // Không cần meta nữa vì thông số đã nằm trong từng file bin
+
+    @Volatile var blockAdult: Boolean    = true
+    @Volatile var blockGambling: Boolean = true
+
+    private data class FilterSet(
+        val phishing:  BloomFilter,
+        val adult:     BloomFilter,
+        val gambling:  BloomFilter,
+        val whitelist: BloomFilter,
+    )
+    private val filterSet = AtomicReference<FilterSet?>()
+
+    private val tempWhitelist = ConcurrentHashMap<String, Long>()
+
+    @Volatile private var initialized = false
+    @Volatile private var listsReady = false
+
+    private val loadDeferred = CompletableDeferred<Unit>()
+
+    enum class BlockCategory { PHISHING, ADULT, GAMBLING, WHITELIST, NONE }
+
+    data class BlockMatch(
+        val category: BlockCategory,
+        val matchDomain: String,
+    )
+
+    private val common2LevelPublicSuffixPrefixes = setOf(
+        "co", "com", "net", "org", "gov", "edu", "ac"
+    )
+
+    // ── PUBLIC API ────────────────────────────────────────────────────────────
+
+    fun isListsReady(): Boolean = listsReady
+
+    suspend fun awaitLoad(timeoutMs: Long = 10000): Boolean {
+        return try {
+            withTimeout(timeoutMs) { loadDeferred.await() }
+            true
+        } catch (e: TimeoutCancellationException) {
+            false
+        }
+    }
+
+    fun hasBinCache(context: Context): Boolean {
+        return listOf(BIN_PHISHING, BIN_ADULT, BIN_GAMBLING, BIN_WHITELIST)
+            .all { File(context.filesDir, it).exists() }
+    }
+
+    fun loadFromBinCache(context: Context): Boolean {
+        return try {
+            val pFilter = BloomFilter.fromBytes(File(context.filesDir, BIN_PHISHING).readBytes())
+            val aFilter = BloomFilter.fromBytes(File(context.filesDir, BIN_ADULT).readBytes())
+            val gFilter = BloomFilter.fromBytes(File(context.filesDir, BIN_GAMBLING).readBytes())
+            val wFilter = BloomFilter.fromBytes(File(context.filesDir, BIN_WHITELIST).readBytes())
+
+            filterSet.set(FilterSet(pFilter, aFilter, gFilter, wFilter))
+            initialized = true
+            listsReady = true
+            loadDeferred.complete(Unit)
+
+            Log.i(TAG, "Load .bin thành công: " +
+                    "phishing=${pFilter.elementCount()}, adult=${aFilter.elementCount()}, " +
+                    "gambling=${gFilter.elementCount()}, whitelist=${wFilter.elementCount()}")
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Load .bin thất bại: ${e.message}")
+            false
+        }
+    }
+
+    fun saveToBinCache(context: Context) {
+        val fs = filterSet.get() ?: return
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                File(context.filesDir, BIN_PHISHING).writeBytes(fs.phishing.toBytes())
+                File(context.filesDir, BIN_ADULT).writeBytes(fs.adult.toBytes())
+                File(context.filesDir, BIN_GAMBLING).writeBytes(fs.gambling.toBytes())
+                File(context.filesDir, BIN_WHITELIST).writeBytes(fs.whitelist.toBytes())
+                Log.i(TAG, "Lưu .bin cache thành công")
+            } catch (e: Exception) {
+                Log.w(TAG, "Lưu .bin thất bại: ${e.message}")
+            }
+        }
+    }
+
+    fun clearBinCache(context: Context) {
+        listOf(BIN_PHISHING, BIN_ADULT, BIN_GAMBLING, BIN_WHITELIST)
+            .forEach { File(context.filesDir, it).delete() }
+        Log.i(TAG, "Đã xóa .bin cache")
+    }
+
+    fun init(context: Context) {
+        if (initialized) return
+        initialized = true
+
+        CoroutineScope(Dispatchers.IO).launch {
+            buildAndSwapFilters(context)
+            listsReady = true
+            loadDeferred.complete(Unit)
+            Log.i(TAG, "DomainBlacklist init xong")
+        }
+    }
+
+    fun reloadFromDatabase(context: Context) {
+        CoroutineScope(Dispatchers.IO).launch {
+            buildAndSwapFilters(context)
+            listsReady = true
+            loadDeferred.complete(Unit)
+            Log.i(TAG, "Reload BloomFilters xong")
+        }
+    }
+
+    suspend fun reloadFromDatabaseSync(context: Context) {
+        withContext(Dispatchers.IO) {
+            buildAndSwapFilters(context)
+        }
+        listsReady = true
+        loadDeferred.complete(Unit)
+        Log.i(TAG, "Reload BloomFilters xong (sync)")
+    }
+
+    // ── PUBLIC API — Matching ─────────────────────────────────────────────────
+
+    fun getBlockCategory(domain: String): BlockCategory =
+        match(domain)?.category ?: BlockCategory.NONE
+
+    fun match(domain: String): BlockMatch? {
+        val clean = normalizeDomain(domain) ?: return null
+        val candidates = domainCandidates(clean)
+
+        val now = System.currentTimeMillis()
+        for (c in candidates) {
+            val expiry = tempWhitelist[c]
+            if (expiry != null) {
+                if (now < expiry) return BlockMatch(BlockCategory.WHITELIST, c)
+                tempWhitelist.remove(c)
+            }
+        }
+
+        val fs = filterSet.get()
+        if (fs == null) {
+            // Nếu filter chưa sẵn sàng, trả về null (caller coi như NONE)
+            Log.w(TAG, "match: filterSet is NULL for domain=$clean")
+            return null
+        }
+
+        // 1. Whitelist
+        for (c in candidates) {
+            if (fs.whitelist.mightContain(c)) {
+                Log.d(TAG, "ALLOW by whitelist: $c (query=$clean)")
+                return BlockMatch(BlockCategory.WHITELIST, c)
+            }
+        }
+
+        // 2. Phishing
+        for (c in candidates) {
+            if (fs.phishing.mightContain(c)) {
+                Log.w(TAG, "BLOCKED [Phishing]: $c (query=$clean)")
+                return BlockMatch(BlockCategory.PHISHING, c)
+            }
+        }
+
+        // 3. Adult
+        if (blockAdult) {
+            for (c in candidates) {
+                if (fs.adult.mightContain(c)) {
+                    Log.w(TAG, "BLOCKED [Adult]: $c (query=$clean)")
+                    return BlockMatch(BlockCategory.ADULT, c)
+                }
+            }
+        }
+
+        // 4. Gambling
+        if (blockGambling) {
+            for (c in candidates) {
+                if (fs.gambling.mightContain(c)) {
+                    Log.w(TAG, "BLOCKED [Gambling]: $c (query=$clean)")
+                    return BlockMatch(BlockCategory.GAMBLING, c)
+                }
+            }
+        }
+
+        return null
+    }
+
+    fun isBlocked(domain: String): Boolean {
+        val cat = getBlockCategory(domain)
+        return cat == BlockCategory.PHISHING ||
+                cat == BlockCategory.ADULT   ||
+                cat == BlockCategory.GAMBLING
+    }
+
+    fun addTemporaryAllow(domain: String) {
+        val clean = normalizeDomain(domain) ?: return
+        val candidates = domainCandidates(clean)
+        val expiry = System.currentTimeMillis() + 300_000L
+        candidates.forEach { tempWhitelist[it] = expiry }
+        Log.i(TAG, "Bypass tạm 5 phút: $clean")
+    }
+
+    // ── PRIVATE — Core load logic ─────────────────────────────────────────────
+
+    private suspend fun buildAndSwapFilters(context: Context) {
+        val newFilterSet = FilterSet(
+            phishing  = buildBlacklistFilter(context, "phishing", FILE_PHISHING, 100_000),
+            adult     = buildBlacklistFilter(context, "adult",    FILE_ADULT,    50_000),
+            gambling  = buildBlacklistFilter(context, "gambling", FILE_GAMBLING, 50_000),
+            whitelist = buildWhitelistFilter(context),
+        )
+        filterSet.set(newFilterSet)
+    }
+
+    private suspend fun buildBlacklistFilter(
+        context: Context,
+        category: String,
+        assetFile: String,
+        defaultSize: Int,
+    ): BloomFilter {
+        return try {
+            val db  = VShieldDatabase.getInstance(context)
+            val dao = db.blocklistDao()
+            val domains = dao.getActiveDomainsByCategory(category)
+            if (domains.isEmpty()) throw Exception("DB trống cho category=$category")
+            Log.i(TAG, "Blacklist $category từ DB: ${domains.size} domains")
+            buildFilter(domains, maxOf(defaultSize, domains.size))
+        } catch (e: Exception) {
+            Log.w(TAG, "Load DB $category fail, fallback assets: ${e.message}")
+            loadFile(context, assetFile, defaultSize)
+        }
+    }
+
+    private suspend fun buildWhitelistFilter(context: Context): BloomFilter {
+        val db           = VShieldDatabase.getInstance(context)
+        val whitelistDao = db.whitelistDao()
+
+        return try {
+            val dbWhitelist     = whitelistDao.getAllDomains().mapNotNull { normalizeDomain(it) }
+            val staticWhitelist = loadStaticWhitelistList(context)
+
+            val merged = LinkedHashSet<String>(staticWhitelist.size + dbWhitelist.size)
+            merged.addAll(staticWhitelist)
+            merged.addAll(dbWhitelist)
+
+            Log.i(TAG, "Whitelist: total=${merged.size}")
+            buildFilter(merged.toList(), maxOf(merged.size, 250_000))
+        } catch (e: Exception) {
+            Log.w(TAG, "Load whitelist DB fail, fallback assets only: ${e.message}")
+            val staticWhitelist = loadStaticWhitelistList(context)
+            buildFilter(staticWhitelist, maxOf(staticWhitelist.size, 50_000))
+        }
+    }
+
+    private fun loadStaticWhitelistList(context: Context): List<String> {
+        val out = ArrayList<String>()
+        try {
+            context.assets.open(FILE_WHITELIST).bufferedReader().useLines { lines ->
+                lines.forEach { line -> normalizeDomain(line)?.let { out.add(it) } }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Không tìm thấy assets/$FILE_WHITELIST: ${e.message}")
+        }
+        out.addAll(listOf(
+            "google.com", "android.com", "gstatic.com",
+            "googleapis.com", "play.google.com", "accounts.google.com"
+        ))
+        return out.distinct()
+    }
+
+    private fun loadFile(context: Context, fileName: String, size: Int): BloomFilter {
+        val filter = BloomFilter.create(expectedInsertions = size, falsePositiveRate = 0.0000001)
+        try {
+            context.assets.open(fileName).bufferedReader().useLines { lines ->
+                lines.forEach { line -> normalizeDomain(line)?.let { filter.add(it) } }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Không tìm thấy assets/$fileName: ${e.message}")
+        }
+        return filter
+    }
+
+    private fun buildFilter(domains: List<String>, size: Int): BloomFilter {
+        val filter = BloomFilter.create(expectedInsertions = size, falsePositiveRate = 0.0000001)
+        domains.forEach { d -> normalizeDomain(d)?.let { filter.add(it) } }
+        return filter
+    }
+
+    // ── PRIVATE — Domain helpers (giữ nguyên) ─────────────────────────────────
+
+    private fun domainCandidates(cleanDomain: String): List<String> {
+        val parts = cleanDomain.split('.')
+        if (parts.size <= 2) return listOf(cleanDomain)
+
+        val out = ArrayList<String>(parts.size)
+        for (i in 0..(parts.size - 2)) {
+            val candidateParts = parts.subList(i, parts.size)
+            if (candidateParts.size < 2) continue
+            if (candidateParts.size == 2) {
+                val left  = candidateParts[0]
+                val right = candidateParts[1]
+                if (right.length == 2 && left in common2LevelPublicSuffixPrefixes) continue
+            }
+            out.add(candidateParts.joinToString("."))
+        }
+        if (out.isEmpty()) out.add(cleanDomain)
+        return out
+    }
+
+    private fun normalizeDomain(raw: String): String? {
+        if (raw.trim().startsWith("#") || raw.isBlank()) return null
+        var s = raw.trim().lowercase(Locale.ROOT)
+        if (s.contains("://")) s = s.substringAfter("://")
+        if (s.contains("/"))   s = s.substringBefore("/")
+        if (s.contains(":"))   s = s.substringBefore(":")
+        s = s.removePrefix("*.").removePrefix("www.").trimEnd('.')
+        if (s.length < 3 || !s.contains(".")) return null
+        return s
     }
 }
 
@@ -3342,15 +3288,6 @@ class DnsVpnWorker(
         }
 
         job = scope.launch {
-            // FIX: Chặn việc đọc packet cho đến khi blacklist + whitelist đã load xong.
-            //
-            // Tại sao cần check ở đây (không phải trong processPacket)?
-            // Vì 10 worker coroutines bên trên đã sẵn sàng nhận packet ngay lập tức.
-            // Nếu bắt đầu đọc TUN trước khi lists sẵn sàng, packets chui vào channel
-            // và bị xử lý với BloomFilter null → toàn bộ filter bị bỏ qua.
-            //
-            // - Toggle on/off cùng process: isListsReady() = true ngay lập tức → 0ms delay.
-            // - Process bị kill + restart:  chờ tối đa MAX_LISTS_WAIT_MS cho đến khi load xong.
             if (!DomainBlacklist.isListsReady()) {
                 Log.w("DnsWorker", "Lists chưa sẵn sàng, tạm dừng đọc TUN...")
                 val deadline = System.currentTimeMillis() + MAX_LISTS_WAIT_MS
@@ -3394,8 +3331,6 @@ class DnsVpnWorker(
         scope.cancel()
     }
 
-    // Chuẩn hóa domain trước khi lookup cache
-    // Giúp "www.badsite.com" và "badsite.com" dùng chung 1 cache entry
     private fun normalizeForCache(domain: String): String =
         domain.removePrefix("www.").lowercase().trim()
 
@@ -3453,8 +3388,6 @@ class DnsVpnWorker(
             }
 
             DomainBlacklist.BlockCategory.NONE -> {
-                // Lists được đảm bảo đã load xong trước khi packet đầu tiên vào đây
-                // (nhờ vào vòng chờ ở start()). Chạy AI bình thường.
                 shouldCheckAi = true
             }
         }
@@ -3467,7 +3400,6 @@ class DnsVpnWorker(
                 val aiDecision = AiResultCache.get(cacheKey)
 
                 if (aiDecision != null) {
-                    // CACHE HIT
                     if (aiDecision.isBlocked) {
                         val count = blocked.incrementAndGet()
                         VpnStats.blockedCount.postValue(count)
@@ -3483,7 +3415,6 @@ class DnsVpnWorker(
                         responsePayload = forwardToUpstream(dnsPayload)
                     }
                 } else {
-                    // CACHE MISS -> REALTIME AI
                     Log.d("VShield", "⏳ Đang treo gói tin để chờ AI phân tích: $qDomain")
 
                     val deferredTask = aiTasks.computeIfAbsent(cacheKey) {
@@ -3567,8 +3498,6 @@ class DnsVpnWorker(
         }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-
     private class DnsSocketPool(
         private val service: VShieldVpnService,
         private val poolSize: Int
@@ -3616,9 +3545,8 @@ class DnsVpnWorker(
     }
 
     companion object {
-        // Thời gian tối đa chờ lists load (chỉ áp dụng khi process bị kill + restart).
-        // Trong toggle bình thường (cùng process), thời gian chờ = 0ms.
-        private const val MAX_LISTS_WAIT_MS = 10_000L
+        // Giảm thời gian chờ từ 10s xuống 2s vì VpnService đã có cơ chế chờ riêng
+        private const val MAX_LISTS_WAIT_MS = 2_000L
     }
 }
 
@@ -3868,6 +3796,140 @@ object ServerApiClient {
             connection?.disconnect()
         }
         return false
+    }
+}
+
+========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/network/Preprocessor.kt
+========================================
+
+package com.trustnet.vshield.network
+
+import android.content.Context
+import android.util.Log
+import org.json.JSONObject
+import java.util.Locale
+import kotlin.math.sqrt
+
+object Preprocessor {
+    private const val TAG = "Preprocessor"
+
+    // Lưu trữ TF-IDF
+    private val vocab = HashMap<String, Int>()
+    private lateinit var idf: DoubleArray
+    private var numFeatures = 0
+
+    // Lưu trữ Ordinal Encoder (Danh mục)
+    private val tldCategories = HashMap<String, Float>()
+    private val serverCategories = HashMap<String, Float>()
+    private val issuerCategories = HashMap<String, Float>()
+
+    fun init(context: Context) {
+        if (vocab.isNotEmpty()) return // Tránh nạp lại nhiều lần
+        try {
+            val jsonString = context.assets.open("preprocessor_data.json").bufferedReader().use { it.readText() }
+            val json = JSONObject(jsonString)
+
+            // 1. Nạp bộ từ điển Vocab
+            val vocabObj = json.getJSONObject("vocab")
+            numFeatures = vocabObj.length()
+            vocabObj.keys().forEach { key ->
+                vocab[key] = vocabObj.getInt(key)
+            }
+
+            // 2. Nạp mảng IDF
+            val idfArray = json.getJSONArray("idf")
+            idf = DoubleArray(idfArray.length())
+            for (i in 0 until idfArray.length()) {
+                idf[i] = idfArray.getDouble(i)
+            }
+
+            // 3. Nạp OrdinalEncoder
+            val catArray = json.getJSONArray("categories")
+
+            // TLD (Index 0)
+            val tldArr = catArray.getJSONArray(0)
+            for (i in 0 until tldArr.length()) tldCategories[tldArr.getString(i)] = i.toFloat()
+
+            // Server Header (Index 1)
+            val serverArr = catArray.getJSONArray(1)
+            for (i in 0 until serverArr.length()) serverCategories[serverArr.getString(i)] = i.toFloat()
+
+            // Issuer (Index 2)
+            val issuerArr = catArray.getJSONArray(2)
+            for (i in 0 until issuerArr.length()) issuerCategories[issuerArr.getString(i)] = i.toFloat()
+
+            Log.i(TAG, "✅ Nạp Preprocessor thành công! TF-IDF Features: $numFeatures")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Lỗi nạp Preprocessor JSON: ${e.message}")
+        }
+    }
+
+    /**
+     * Băm chuỗi Text ra mảng TF-IDF (Khớp 100% logic char_wb của scikit-learn)
+     */
+    fun transformText(text: String): FloatArray {
+        val vector = FloatArray(numFeatures) { 0f }
+        if (vocab.isEmpty() || text.isBlank()) return vector
+
+        val lowerText = text.lowercase(Locale.ROOT)
+
+        val words = lowerText.split(Regex("\\s+")).filter { it.isNotBlank() }
+
+        val tfCount = HashMap<Int, Int>()
+
+        for (w in words) {
+            val paddedWord = " $w "
+            val n = paddedWord.length
+
+            for (nGramLen in 2..5) {
+                for (i in 0..n - nGramLen) {
+                    val nGram = paddedWord.substring(i, i + nGramLen)
+                    val idx = vocab[nGram]
+                    if (idx != null) {
+                        tfCount[idx] = tfCount.getOrDefault(idx, 0) + 1
+                    }
+                }
+            }
+        }
+
+        var sumSquares = 0.0
+        for ((idx, count) in tfCount) {
+            // Áp dụng Sublinear TF giống hệt Python (1 + ln(tf))
+            val tfValue = if (count > 0) 1.0 + kotlin.math.ln(count.toDouble()) else 0.0
+            val tfidfValue = tfValue * idf[idx]
+
+            vector[idx] = tfidfValue.toFloat()
+            sumSquares += tfidfValue * tfidfValue
+        }
+
+        // L2 Normalization
+        if (sumSquares > 0) {
+            val norm = sqrt(sumSquares).toFloat()
+            for ((idx, _) in tfCount) {
+                vector[idx] = vector[idx] / norm
+            }
+        }
+
+        return vector
+    }
+
+    /**
+     * Chuyển đổi Danh mục thành các con số Ordinal
+     */
+    fun transformCategory(tld: String, serverHeader: String, issuer: String): FloatArray {
+        val catVec = FloatArray(3)
+        // Dùng handle_unknown='use_encoded_value', unknown_value=-1 (Giống code Python)
+        catVec[0] = encodeOrUnknown(tld, tldCategories)
+        catVec[1] = encodeOrUnknown(serverHeader, serverCategories)
+        catVec[2] = encodeOrUnknown(issuer, issuerCategories)
+        return catVec
+    }
+
+    private fun encodeOrUnknown(value: String, map: Map<String, Float>): Float {
+        val cleanValue = value.lowercase(Locale.ROOT).trim()
+        // Tìm kiếm chính xác trước, nếu không có thì trả về -1f
+        return map[cleanValue] ?: -1f
     }
 }
 
@@ -4365,140 +4427,6 @@ object OnDeviceAi {
 }
 
 ========================================
-FILE: ./app/src/main/java/com/trustnet/vshield/network/Preprocessor.kt
-========================================
-
-package com.trustnet.vshield.network
-
-import android.content.Context
-import android.util.Log
-import org.json.JSONObject
-import java.util.Locale
-import kotlin.math.sqrt
-
-object Preprocessor {
-    private const val TAG = "Preprocessor"
-
-    // Lưu trữ TF-IDF
-    private val vocab = HashMap<String, Int>()
-    private lateinit var idf: DoubleArray
-    private var numFeatures = 0
-
-    // Lưu trữ Ordinal Encoder (Danh mục)
-    private val tldCategories = HashMap<String, Float>()
-    private val serverCategories = HashMap<String, Float>()
-    private val issuerCategories = HashMap<String, Float>()
-
-    fun init(context: Context) {
-        if (vocab.isNotEmpty()) return // Tránh nạp lại nhiều lần
-        try {
-            val jsonString = context.assets.open("preprocessor_data.json").bufferedReader().use { it.readText() }
-            val json = JSONObject(jsonString)
-
-            // 1. Nạp bộ từ điển Vocab
-            val vocabObj = json.getJSONObject("vocab")
-            numFeatures = vocabObj.length()
-            vocabObj.keys().forEach { key ->
-                vocab[key] = vocabObj.getInt(key)
-            }
-
-            // 2. Nạp mảng IDF
-            val idfArray = json.getJSONArray("idf")
-            idf = DoubleArray(idfArray.length())
-            for (i in 0 until idfArray.length()) {
-                idf[i] = idfArray.getDouble(i)
-            }
-
-            // 3. Nạp OrdinalEncoder
-            val catArray = json.getJSONArray("categories")
-
-            // TLD (Index 0)
-            val tldArr = catArray.getJSONArray(0)
-            for (i in 0 until tldArr.length()) tldCategories[tldArr.getString(i)] = i.toFloat()
-
-            // Server Header (Index 1)
-            val serverArr = catArray.getJSONArray(1)
-            for (i in 0 until serverArr.length()) serverCategories[serverArr.getString(i)] = i.toFloat()
-
-            // Issuer (Index 2)
-            val issuerArr = catArray.getJSONArray(2)
-            for (i in 0 until issuerArr.length()) issuerCategories[issuerArr.getString(i)] = i.toFloat()
-
-            Log.i(TAG, "✅ Nạp Preprocessor thành công! TF-IDF Features: $numFeatures")
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Lỗi nạp Preprocessor JSON: ${e.message}")
-        }
-    }
-
-    /**
-     * Băm chuỗi Text ra mảng TF-IDF (Khớp 100% logic char_wb của scikit-learn)
-     */
-    fun transformText(text: String): FloatArray {
-        val vector = FloatArray(numFeatures) { 0f }
-        if (vocab.isEmpty() || text.isBlank()) return vector
-
-        val lowerText = text.lowercase(Locale.ROOT)
-
-        val words = lowerText.split(Regex("\\s+")).filter { it.isNotBlank() }
-
-        val tfCount = HashMap<Int, Int>()
-
-        for (w in words) {
-            val paddedWord = " $w "
-            val n = paddedWord.length
-
-            for (nGramLen in 2..5) {
-                for (i in 0..n - nGramLen) {
-                    val nGram = paddedWord.substring(i, i + nGramLen)
-                    val idx = vocab[nGram]
-                    if (idx != null) {
-                        tfCount[idx] = tfCount.getOrDefault(idx, 0) + 1
-                    }
-                }
-            }
-        }
-
-        var sumSquares = 0.0
-        for ((idx, count) in tfCount) {
-            // Áp dụng Sublinear TF giống hệt Python (1 + ln(tf))
-            val tfValue = if (count > 0) 1.0 + kotlin.math.ln(count.toDouble()) else 0.0
-            val tfidfValue = tfValue * idf[idx]
-
-            vector[idx] = tfidfValue.toFloat()
-            sumSquares += tfidfValue * tfidfValue
-        }
-
-        // L2 Normalization
-        if (sumSquares > 0) {
-            val norm = sqrt(sumSquares).toFloat()
-            for ((idx, _) in tfCount) {
-                vector[idx] = vector[idx] / norm
-            }
-        }
-
-        return vector
-    }
-
-    /**
-     * Chuyển đổi Danh mục thành các con số Ordinal
-     */
-    fun transformCategory(tld: String, serverHeader: String, issuer: String): FloatArray {
-        val catVec = FloatArray(3)
-        // Dùng handle_unknown='use_encoded_value', unknown_value=-1 (Giống code Python)
-        catVec[0] = encodeOrUnknown(tld, tldCategories)
-        catVec[1] = encodeOrUnknown(serverHeader, serverCategories)
-        catVec[2] = encodeOrUnknown(issuer, issuerCategories)
-        return catVec
-    }
-
-    private fun encodeOrUnknown(value: String, map: Map<String, Float>): Float {
-        val cleanValue = value.lowercase(Locale.ROOT).trim()
-        // Tìm kiếm chính xác trước, nếu không có thì trả về -1f
-        return map[cleanValue] ?: -1f
-    }
-}
-
-========================================
 FILE: ./app/src/main/java/com/trustnet/vshield/parenting/ParentingPrefs.kt
 ========================================
 
@@ -4812,282 +4740,6 @@ object PasswordHasher {
             result = result or (a[i].toInt() xor b[i].toInt())
         }
         return result == 0
-    }
-}
-
-========================================
-FILE: ./app/src/main/java/com/trustnet/vshield/VShieldVpnService.kt
-========================================
-
-package com.trustnet.vshield
-
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.content.Intent
-import android.content.pm.ServiceInfo
-import android.net.VpnService
-import android.os.Build
-import android.os.ParcelFileDescriptor
-import android.util.Log
-import android.widget.Toast
-import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
-import com.trustnet.vshield.core.DomainBlacklist
-import com.trustnet.vshield.core.VpnStats
-import com.trustnet.vshield.network.OnDeviceAi
-import com.trustnet.vshield.parenting.ParentingPrefs
-import com.trustnet.vshield.vpn.DnsVpnWorker
-import com.trustnet.vshield.vpn.packet.UdpIpv4Packet
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-
-class VShieldVpnService : VpnService() {
-
-    private var vpnInterface: ParcelFileDescriptor? = null
-    private var worker: DnsVpnWorker? = null
-    @Volatile private var running: Boolean = false
-
-    @Volatile private var isParentingMode: Boolean = false
-
-    override fun onCreate() {
-        super.onCreate()
-
-        // Không gọi DomainBlacklist.init() vô điều kiện ở đây nữa.
-        // Lý do: khi người dùng toggle on/off bình thường trong cùng session,
-        // listsReady đã = true (được set từ SplashViewModel). Gọi init() lại sẽ
-        // spawn thêm coroutine load DB không cần thiết và có thể race với data hiện có.
-        //
-        // Chỉ reload khi process thực sự bị kill rồi START_STICKY restart service
-        // (lúc đó listsReady = false vì object bị reset).
-        if (!DomainBlacklist.isListsReady()) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val loaded = if (DomainBlacklist.hasBinCache(applicationContext)) {
-                        DomainBlacklist.loadFromBinCache(applicationContext)
-                    } else {
-                        false
-                    }
-
-                    if (!loaded) {
-                        // Không có bin cache hoặc bin bị lỗi → reload từ DB
-                        // (thường chỉ xảy ra lần cài đầu tiên hoặc sau khi xóa cache)
-                        DomainBlacklist.reloadFromDatabaseSync(applicationContext)
-                    }
-
-                    Log.i("VpnService", "DomainBlacklist nạp lại thành công sau process restart")
-                } catch (e: Exception) {
-                    Log.e("VpnService", "Lỗi nạp DomainBlacklist sau restart: ${e.message}")
-                }
-            }
-
-            // Đảm bảo AI cũng được load lại nếu process bị kill.
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    OnDeviceAi.init(applicationContext)
-                    Log.i("VpnService", "OnDeviceAi nạp lại thành công sau process restart")
-                } catch (e: Exception) {
-                    Log.e("VpnService", "Lỗi nạp OnDeviceAi sau restart: ${e.message}")
-                }
-            }
-        }
-
-        // Lắng nghe trạng thái Parenting Mode liên tục dưới nền
-        CoroutineScope(Dispatchers.IO).launch {
-            ParentingPrefs(this@VShieldVpnService).data.collect { prefsData ->
-                isParentingMode = prefsData.parentingEnabled
-            }
-        }
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // XỬ LÝ LỆNH BYPASS TỪ NÚT BẤM TRÊN NOTIFICATION
-        if (intent?.action == ACTION_ALLOW_DOMAIN) {
-            if (isParentingMode) {
-                Toast.makeText(this, "Không thể bỏ qua chặn trong Chế độ Phụ huynh!", Toast.LENGTH_SHORT).show()
-                val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                mgr.cancel(BLOCK_NOTIF_ID)
-            } else {
-                val domain = intent.getStringExtra(EXTRA_DOMAIN)
-                if (domain != null) {
-                    DomainBlacklist.addTemporaryAllow(domain)
-                    uiMuteUntil = System.currentTimeMillis() + 15000
-
-                    val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                    mgr.cancel(BLOCK_NOTIF_ID)
-
-                    Toast.makeText(this, "Đã cho phép: $domain. Vui lòng tải lại trang!", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-
-        // Cập nhật cài đặt bộ lọc cơ bản (Adult/Gambling)
-        if (intent?.action == ACTION_UPDATE_SETTINGS) {
-            val prefs = getSharedPreferences("VShieldPrefs", MODE_PRIVATE)
-            DomainBlacklist.blockAdult    = prefs.getBoolean("BLOCK_ADULT",    true)
-            DomainBlacklist.blockGambling = prefs.getBoolean("BLOCK_GAMBLING", true)
-        }
-
-        // FIX LỖI 3: Đọc lại settings TỪ SharedPreferences trước khi bật VPN.
-        //
-        // Vấn đề cũ: blockAdult và blockGambling là @Volatile var với giá trị mặc định
-        // = true trong object DomainBlacklist. Nếu process bị kill rồi START_STICKY
-        // khởi động lại service (trước khi user mở app), hai biến này được reset về true,
-        // và KHÔNG có gì đọc lại từ SharedPreferences cho đến khi MainActivity.onCreate()
-        // chạy. Trong khoảng thời gian đó VPN hoạt động với sai cài đặt.
-        //
-        // MainActivity.onCreate() đã đọc lại settings (dòng 5909-5910 trong code gốc),
-        // nhưng service có thể được START_STICKY trước khi activity khởi động.
-        // Đọc lại ở đây đảm bảo settings luôn đúng tại thời điểm VPN bắt đầu chạy.
-        when (intent?.action) {
-            ACTION_START -> {
-                // Đọc lại từ SharedPreferences để đảm bảo đúng dù process vừa restart
-                val prefs = getSharedPreferences("VShieldPrefs", MODE_PRIVATE)
-                DomainBlacklist.blockAdult    = prefs.getBoolean("BLOCK_ADULT",    true)
-                DomainBlacklist.blockGambling = prefs.getBoolean("BLOCK_GAMBLING", true)
-                startVpn()
-            }
-            ACTION_STOP -> stopVpn()
-        }
-        return START_STICKY
-    }
-
-    override fun onRevoke() {
-        stopVpn()
-        super.onRevoke()
-    }
-
-    fun isRunning(): Boolean = running
-
-    private fun startVpn() {
-        if (running) return
-        running = true
-        VpnStats.isRunning.postValue(true)
-        startInForeground()
-
-        val builder = Builder()
-            .setSession("VShield Home")
-            .setMtu(MTU)
-            .addAddress(VPN_CLIENT_IP, 32)
-            .addRoute(VPN_DNS_IP, 32)
-            .addDnsServer(VPN_DNS_IP)
-            .setBlocking(true)
-
-        try {
-            vpnInterface = builder.establish()
-            if (vpnInterface == null) {
-                running = false
-                stopSelf()
-                return
-            }
-            worker = DnsVpnWorker(this, vpnInterface!!)
-            worker?.start()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            stopVpn()
-        }
-    }
-
-    private fun stopVpn() {
-        if (!running) return
-        running = false
-        VpnStats.isRunning.postValue(false)
-        worker?.stop()
-        worker = null
-        try { vpnInterface?.close() } catch (_: Exception) {}
-        vpnInterface = null
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-    }
-
-    private fun startInForeground() {
-        val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel(NOTIF_CH, "VShield VPN", NotificationManager.IMPORTANCE_LOW)
-            mgr.createNotificationChannel(ch)
-
-            val alertCh = NotificationChannel(ALERT_NOTIF_CH, "Cảnh báo chặn", NotificationManager.IMPORTANCE_HIGH)
-            alertCh.description = "Hiển thị cảnh báo khi chặn các trang web độc hại"
-            mgr.createNotificationChannel(alertCh)
-        }
-
-        val pi = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(this, NOTIF_CH)
-            .setSmallIcon(android.R.drawable.ic_secure)
-            .setContentTitle("VShield đang bảo vệ")
-            .setContentText("Hệ thống lọc đang chạy ngầm")
-            .setContentIntent(pi)
-            .setOngoing(true)
-            .build()
-
-        if (Build.VERSION.SDK_INT >= 34) {
-            ServiceCompat.startForeground(this, NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIF_ID, notification)
-        }
-    }
-
-    fun showBlockingNotification(domain: String, reason: String = "Nội dung không phù hợp") {
-        val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-
-        val notificationBuilder = NotificationCompat.Builder(this, ALERT_NOTIF_CH)
-            .setSmallIcon(android.R.drawable.ic_secure)
-            .setContentTitle("Truy cập bị hạn chế")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setAutoCancel(true)
-
-        if (isParentingMode) {
-            notificationBuilder.setContentText("Đã chặn: $domain ($reason)")
-        } else {
-            val bypassIntent = Intent(this, VShieldVpnService::class.java).apply {
-                action = ACTION_ALLOW_DOMAIN
-                putExtra(EXTRA_DOMAIN, domain)
-            }
-            val bypassPendingIntent = PendingIntent.getService(
-                this,
-                domain.hashCode(),
-                bypassIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            notificationBuilder.setContentText("Đã chặn: $domain ($reason)")
-            notificationBuilder.addAction(
-                android.R.drawable.ic_menu_revert,
-                "Vẫn tiếp tục truy cập",
-                bypassPendingIntent
-            )
-        }
-
-        mgr.notify(BLOCK_NOTIF_ID, notificationBuilder.build())
-    }
-
-    companion object {
-        const val ACTION_START           = "vn.ptit.vshieldhome.action.START"
-        const val ACTION_STOP            = "vn.ptit.vshieldhome.action.STOP"
-        const val ACTION_UPDATE_SETTINGS = "vn.ptit.vshieldhome.action.UPDATE_SETTINGS"
-        const val ACTION_ALLOW_DOMAIN    = "vn.ptit.vshieldhome.action.ALLOW"
-        const val EXTRA_DOMAIN           = "extra_domain"
-
-        const val MTU            = 1500
-        const val VPN_DNS_IP     = "10.10.0.1"
-        const val VPN_CLIENT_IP  = "10.10.0.2"
-        const val UPSTREAM_DNS_IP = "1.1.1.1"
-
-        val VPN_DNS_IP_INT: Int = UdpIpv4Packet.ipStringToInt(VPN_DNS_IP)
-
-        private const val NOTIF_CH       = "vshield_vpn"
-        private const val NOTIF_ID       = 1001
-        private const val ALERT_NOTIF_CH = "vshield_alerts"
-        private const val BLOCK_NOTIF_ID = 1002
-
-        @Volatile var uiMuteUntil: Long = 0L
     }
 }
 
@@ -6232,6 +5884,283 @@ private fun AppBottomNavBar(
                 )
             )
         }
+    }
+}
+
+========================================
+FILE: ./app/src/main/java/com/trustnet/vshield/VShieldVpnService.kt
+========================================
+
+package com.trustnet.vshield
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.net.VpnService
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import android.util.Log
+import android.widget.Toast
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import com.trustnet.vshield.core.DomainBlacklist
+import com.trustnet.vshield.core.VpnStats
+import com.trustnet.vshield.network.OnDeviceAi
+import com.trustnet.vshield.parenting.ParentingPrefs
+import com.trustnet.vshield.vpn.DnsVpnWorker
+import com.trustnet.vshield.vpn.packet.UdpIpv4Packet
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class VShieldVpnService : VpnService() {
+
+    private var vpnInterface: ParcelFileDescriptor? = null
+    private var worker: DnsVpnWorker? = null
+    @Volatile private var running: Boolean = false
+
+    @Volatile private var isParentingMode: Boolean = false
+
+    override fun onCreate() {
+        super.onCreate()
+
+        // Nếu filter chưa sẵn sàng, khởi tạo (chạy trong nền)
+        if (!DomainBlacklist.isListsReady()) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val loaded = if (DomainBlacklist.hasBinCache(applicationContext)) {
+                        DomainBlacklist.loadFromBinCache(applicationContext)
+                    } else {
+                        false
+                    }
+                    if (!loaded) {
+                        DomainBlacklist.reloadFromDatabaseSync(applicationContext)
+                    }
+                    Log.i("VpnService", "DomainBlacklist nạp lại thành công sau process restart")
+                } catch (e: Exception) {
+                    Log.e("VpnService", "Lỗi nạp DomainBlacklist sau restart: ${e.message}")
+                }
+            }
+
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    OnDeviceAi.init(applicationContext)
+                    Log.i("VpnService", "OnDeviceAi nạp lại thành công sau process restart")
+                } catch (e: Exception) {
+                    Log.e("VpnService", "Lỗi nạp OnDeviceAi sau restart: ${e.message}")
+                }
+            }
+        }
+
+        // Lắng nghe trạng thái Parenting Mode liên tục dưới nền
+        CoroutineScope(Dispatchers.IO).launch {
+            ParentingPrefs(this@VShieldVpnService).data.collect { prefsData ->
+                isParentingMode = prefsData.parentingEnabled
+            }
+        }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Xử lý các hành động đặc biệt trước
+        when (intent?.action) {
+            ACTION_ALLOW_DOMAIN -> {
+                if (isParentingMode) {
+                    Toast.makeText(this, "Không thể bỏ qua chặn trong Chế độ Phụ huynh!", Toast.LENGTH_SHORT).show()
+                    getSystemService(NotificationManager::class.java).cancel(BLOCK_NOTIF_ID)
+                } else {
+                    intent.getStringExtra(EXTRA_DOMAIN)?.let { domain ->
+                        DomainBlacklist.addTemporaryAllow(domain)
+                        uiMuteUntil = System.currentTimeMillis() + 15000
+                        getSystemService(NotificationManager::class.java).cancel(BLOCK_NOTIF_ID)
+                        Toast.makeText(this, "Đã cho phép: $domain. Vui lòng tải lại trang!", Toast.LENGTH_LONG).show()
+                    }
+                }
+                return START_STICKY
+            }
+            ACTION_UPDATE_SETTINGS -> {
+                val prefs = getSharedPreferences("VShieldPrefs", MODE_PRIVATE)
+                DomainBlacklist.blockAdult = prefs.getBoolean("BLOCK_ADULT", true)
+                DomainBlacklist.blockGambling = prefs.getBoolean("BLOCK_GAMBLING", true)
+                return START_STICKY
+            }
+        }
+
+        // Xử lý start/stop và restart (intent null)
+        when (intent?.action) {
+            ACTION_START -> {
+                // Đưa service lên foreground ngay lập tức để tránh bị kill khi clear tab
+                startInForeground()
+                CoroutineScope(Dispatchers.IO).launch {
+                    startVpn()
+                }
+            }
+            ACTION_STOP -> {
+                stopVpn()
+            }
+            null -> {
+                // Service được restart do hệ thống (START_STICKY)
+                // Khôi phục foreground và VPN
+                startInForeground()
+                CoroutineScope(Dispatchers.IO).launch {
+                    startVpn()
+                }
+            }
+        }
+        return START_STICKY
+    }
+
+    override fun onRevoke() {
+        stopVpn()
+        super.onRevoke()
+    }
+
+    fun isRunning(): Boolean = running
+
+    private suspend fun startVpn() {
+        if (running) return
+
+        // Chờ filter ready (tối đa 10 giây)
+        val ready = DomainBlacklist.awaitLoad(10000)
+        if (!ready) {
+            Log.e("VpnService", "Filter not ready after 10s, cannot start VPN")
+            withContext(Dispatchers.Main) {
+                Toast.makeText(
+                    this@VShieldVpnService,
+                    "Không thể khởi động VShield: bộ lọc chưa sẵn sàng.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+            return
+        }
+
+        running = true
+        VpnStats.isRunning.postValue(true)
+
+        val builder = Builder()
+            .setSession("VShield Home")
+            .setMtu(MTU)
+            .addAddress(VPN_CLIENT_IP, 32)
+            .addRoute(VPN_DNS_IP, 32)
+            .addDnsServer(VPN_DNS_IP)
+            .setBlocking(true)
+
+        try {
+            vpnInterface = builder.establish()
+            if (vpnInterface == null) {
+                running = false
+                stopSelf()
+                return
+            }
+            worker = DnsVpnWorker(this@VShieldVpnService, vpnInterface!!)
+            worker?.start()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            stopVpn()
+        }
+    }
+
+    private fun stopVpn() {
+        if (!running) return
+        running = false
+        VpnStats.isRunning.postValue(false)
+        worker?.stop()
+        worker = null
+        try { vpnInterface?.close() } catch (_: Exception) {}
+        vpnInterface = null
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+    }
+
+    private fun startInForeground() {
+        val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val ch = NotificationChannel(NOTIF_CH, "VShield VPN", NotificationManager.IMPORTANCE_LOW)
+            mgr.createNotificationChannel(ch)
+
+            val alertCh = NotificationChannel(ALERT_NOTIF_CH, "Cảnh báo chặn", NotificationManager.IMPORTANCE_HIGH)
+            alertCh.description = "Hiển thị cảnh báo khi chặn các trang web độc hại"
+            mgr.createNotificationChannel(alertCh)
+        }
+
+        val pi = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, NOTIF_CH)
+            .setSmallIcon(android.R.drawable.ic_secure)
+            .setContentTitle("VShield đang bảo vệ")
+            .setContentText("Hệ thống lọc đang chạy ngầm")
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= 34) {
+            ServiceCompat.startForeground(this, NOTIF_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIF_ID, notification)
+        }
+    }
+
+    fun showBlockingNotification(domain: String, reason: String = "Nội dung không phù hợp") {
+        val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+
+        val notificationBuilder = NotificationCompat.Builder(this, ALERT_NOTIF_CH)
+            .setSmallIcon(android.R.drawable.ic_secure)
+            .setContentTitle("Truy cập bị hạn chế")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setAutoCancel(true)
+
+        if (isParentingMode) {
+            notificationBuilder.setContentText("Đã chặn: $domain ($reason)")
+        } else {
+            val bypassIntent = Intent(this, VShieldVpnService::class.java).apply {
+                action = ACTION_ALLOW_DOMAIN
+                putExtra(EXTRA_DOMAIN, domain)
+            }
+            val bypassPendingIntent = PendingIntent.getService(
+                this,
+                domain.hashCode(),
+                bypassIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            notificationBuilder.setContentText("Đã chặn: $domain ($reason)")
+            notificationBuilder.addAction(
+                android.R.drawable.ic_menu_revert,
+                "Vẫn tiếp tục truy cập",
+                bypassPendingIntent
+            )
+        }
+
+        mgr.notify(BLOCK_NOTIF_ID, notificationBuilder.build())
+    }
+
+    companion object {
+        const val ACTION_START           = "vn.ptit.vshieldhome.action.START"
+        const val ACTION_STOP            = "vn.ptit.vshieldhome.action.STOP"
+        const val ACTION_UPDATE_SETTINGS = "vn.ptit.vshieldhome.action.UPDATE_SETTINGS"
+        const val ACTION_ALLOW_DOMAIN    = "vn.ptit.vshieldhome.action.ALLOW"
+        const val EXTRA_DOMAIN           = "extra_domain"
+
+        const val MTU            = 1500
+        const val VPN_DNS_IP     = "10.10.0.1"
+        const val VPN_CLIENT_IP  = "10.10.0.2"
+        const val UPSTREAM_DNS_IP = "1.1.1.1"
+
+        val VPN_DNS_IP_INT: Int = UdpIpv4Packet.ipStringToInt(VPN_DNS_IP)
+
+        private const val NOTIF_CH       = "vshield_vpn"
+        private const val NOTIF_ID       = 1001
+        private const val ALERT_NOTIF_CH = "vshield_alerts"
+        private const val BLOCK_NOTIF_ID = 1002
+
+        @Volatile var uiMuteUntil: Long = 0L
     }
 }
 

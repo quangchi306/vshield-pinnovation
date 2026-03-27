@@ -33,6 +33,7 @@ class VShieldVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.i("VpnService", "onCreate")
 
         if (!DomainBlacklist.isListsReady()) {
             CoroutineScope(Dispatchers.IO).launch {
@@ -42,23 +43,21 @@ class VShieldVpnService : VpnService() {
                     } else {
                         false
                     }
-
                     if (!loaded) {
                         DomainBlacklist.reloadFromDatabaseSync(applicationContext)
                     }
-
-                    Log.i("VpnService", "DomainBlacklist nạp lại thành công sau process restart")
+                    Log.i("VpnService", "DomainBlacklist loaded after restart")
                 } catch (e: Exception) {
-                    Log.e("VpnService", "Lỗi nạp DomainBlacklist sau restart: ${e.message}")
+                    Log.e("VpnService", "Error loading DomainBlacklist: ${e.message}")
                 }
             }
 
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     OnDeviceAi.init(applicationContext)
-                    Log.i("VpnService", "OnDeviceAi nạp lại thành công sau process restart")
+                    Log.i("VpnService", "OnDeviceAi loaded after restart")
                 } catch (e: Exception) {
-                    Log.e("VpnService", "Lỗi nạp OnDeviceAi sau restart: ${e.message}")
+                    Log.e("VpnService", "Error loading OnDeviceAi: ${e.message}")
                 }
             }
         }
@@ -71,41 +70,49 @@ class VShieldVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_ALLOW_DOMAIN) {
-            if (isParentingMode) {
-                Toast.makeText(this, "Không thể bỏ qua chặn trong Chế độ Phụ huynh!", Toast.LENGTH_SHORT).show()
-                val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                mgr.cancel(BLOCK_NOTIF_ID)
-            } else {
-                val domain = intent.getStringExtra(EXTRA_DOMAIN)
-                if (domain != null) {
-                    DomainBlacklist.addTemporaryAllow(domain)
-                    uiMuteUntil = System.currentTimeMillis() + 15000
-
-                    val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-                    mgr.cancel(BLOCK_NOTIF_ID)
-
-                    Toast.makeText(this, "Đã cho phép: $domain. Vui lòng tải lại trang!", Toast.LENGTH_LONG).show()
+        when (intent?.action) {
+            ACTION_ALLOW_DOMAIN -> {
+                if (isParentingMode) {
+                    Toast.makeText(this, "Không thể bỏ qua chặn trong Chế độ Phụ huynh!", Toast.LENGTH_SHORT).show()
+                    getSystemService(NotificationManager::class.java).cancel(BLOCK_NOTIF_ID)
+                } else {
+                    intent.getStringExtra(EXTRA_DOMAIN)?.let { domain ->
+                        DomainBlacklist.addTemporaryAllow(domain)
+                        uiMuteUntil = System.currentTimeMillis() + 15000
+                        getSystemService(NotificationManager::class.java).cancel(BLOCK_NOTIF_ID)
+                        Toast.makeText(this, "Đã cho phép: $domain. Vui lòng tải lại trang!", Toast.LENGTH_LONG).show()
+                    }
                 }
+                return START_STICKY
             }
-        }
-
-        if (intent?.action == ACTION_UPDATE_SETTINGS) {
-            val prefs = getSharedPreferences("VShieldPrefs", MODE_PRIVATE)
-            DomainBlacklist.blockAdult    = prefs.getBoolean("BLOCK_ADULT",    true)
-            DomainBlacklist.blockGambling = prefs.getBoolean("BLOCK_GAMBLING", true)
+            ACTION_UPDATE_SETTINGS -> {
+                val prefs = getSharedPreferences("VShieldPrefs", MODE_PRIVATE)
+                DomainBlacklist.blockAdult = prefs.getBoolean("BLOCK_ADULT", true)
+                DomainBlacklist.blockGambling = prefs.getBoolean("BLOCK_GAMBLING", true)
+                return START_STICKY
+            }
         }
 
         when (intent?.action) {
             ACTION_START -> {
-                val prefs = getSharedPreferences("VShieldPrefs", MODE_PRIVATE)
-                DomainBlacklist.blockAdult    = prefs.getBoolean("BLOCK_ADULT",    true)
-                DomainBlacklist.blockGambling = prefs.getBoolean("BLOCK_GAMBLING", true)
+                Log.i("VpnService", "ACTION_START received")
+                startInForeground()
                 CoroutineScope(Dispatchers.IO).launch {
                     startVpn()
                 }
             }
-            ACTION_STOP -> stopVpn()
+            ACTION_STOP -> {
+                Log.i("VpnService", "ACTION_STOP received")
+                stopVpn()
+            }
+            null -> {
+                // Service restarted by system (START_STICKY)
+                Log.i("VpnService", "Restart with null intent")
+                startInForeground()
+                CoroutineScope(Dispatchers.IO).launch {
+                    startVpn()
+                }
+            }
         }
         return START_STICKY
     }
@@ -118,23 +125,28 @@ class VShieldVpnService : VpnService() {
     fun isRunning(): Boolean = running
 
     private suspend fun startVpn() {
-        if (running) return
+        if (running) {
+            Log.i("VpnService", "VPN already running")
+            return
+        }
 
-        // Chờ filter ready
+        // Wait for filter to be ready (max 10 seconds)
         val ready = DomainBlacklist.awaitLoad(10000)
         if (!ready) {
             Log.e("VpnService", "Filter not ready after 10s, cannot start VPN")
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@VShieldVpnService, "Không thể khởi động VShield: bộ lọc chưa sẵn sàng.", Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    this@VShieldVpnService,
+                    "Không thể khởi động VShield: bộ lọc chưa sẵn sàng.",
+                    Toast.LENGTH_LONG
+                ).show()
             }
             return
         }
 
         running = true
         VpnStats.isRunning.postValue(true)
-        withContext(Dispatchers.Main) {
-            startInForeground()
-        }
+        Log.i("VpnService", "VPN starting...")
 
         val builder = Builder()
             .setSession("VShield Home")
@@ -147,14 +159,17 @@ class VShieldVpnService : VpnService() {
         try {
             vpnInterface = builder.establish()
             if (vpnInterface == null) {
+                Log.e("VpnService", "establish() returned null")
                 running = false
+                VpnStats.isRunning.postValue(false)
                 stopSelf()
                 return
             }
             worker = DnsVpnWorker(this@VShieldVpnService, vpnInterface!!)
             worker?.start()
+            Log.i("VpnService", "VPN started successfully")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("VpnService", "Error starting VPN: ${e.message}", e)
             stopVpn()
         }
     }
@@ -169,6 +184,7 @@ class VShieldVpnService : VpnService() {
         vpnInterface = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
+        Log.i("VpnService", "VPN stopped")
     }
 
     private fun startInForeground() {
@@ -201,6 +217,7 @@ class VShieldVpnService : VpnService() {
         } else {
             startForeground(NOTIF_ID, notification)
         }
+        Log.i("VpnService", "Foreground service started")
     }
 
     fun showBlockingNotification(domain: String, reason: String = "Nội dung không phù hợp") {
