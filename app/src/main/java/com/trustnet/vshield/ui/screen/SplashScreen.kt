@@ -47,7 +47,30 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     private fun startInitialization() {
         viewModelScope.launch {
 
-            //Đã có .bin cache → vào app ngay (~50ms)
+            // FIX: Nếu lists đã được nạp sẵn vào RAM (service đang chạy, cùng process),
+            // KHÔNG khởi tạo lại. Lý do: gọi loadFromBinCache() lần thứ hai trong khi
+            // VPN đang xử lý traffic sẽ set lần lượt từng AtomicReference (phishing →
+            // adult → gambling → whitelist). Giữa các lần set đó, processPacket() chạy
+            // với filter cũ+mới lẫn lộn → cả blacklist lẫn whitelist hoạt động sai.
+            //
+            // Kịch bản này xảy ra khi: người dùng đóng app từ recents rồi mở lại,
+            // trong khi VPN service vẫn đang chạy trong nền.
+            if (DomainBlacklist.isListsReady()) {
+                Log.i("SplashVM", "Lists đã sẵn sàng (service đang chạy), bỏ qua init.")
+                _progress.value   = 1.0f
+                _statusText.value = "Hệ thống đang hoạt động"
+                _isReady.value    = true
+
+                // Vẫn chạy sync ngầm để cập nhật danh sách mới nhất
+                launch(Dispatchers.IO) {
+                    Log.i("SplashVM", "Sync ngầm (fast-path)...")
+                    val result = repo.sync()
+                    Log.i("SplashVM", "Sync ngầm hoàn tất: $result")
+                }
+                return@launch
+            }
+
+            // ── NHÁNH NHANH: Đã có .bin cache → vào app ngay (~50ms) ──────────────
             if (DomainBlacklist.hasBinCache(getApplication())) {
 
                 _progress.value  = 0.1f
@@ -57,11 +80,15 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                     DomainBlacklist.loadFromBinCache(getApplication())
                 }
 
-                // Nếu .bin bị lỗi → fallback load từ DB
+                // Nếu .bin bị lỗi → fallback load từ DB.
+                // FIX LỖI 2: Dùng reloadFromDatabaseSync() thay vì init().
+                // init() là fire-and-forget (spawn coroutine rồi return ngay),
+                // withContext() không thực sự chờ filter nạp xong.
+                // reloadFromDatabaseSync() là suspend fun → withContext() chờ đúng cách.
                 if (!loadOk) {
                     _statusText.value = "Cache lỗi, đang nạp từ dữ liệu cũ..."
                     withContext(Dispatchers.IO) {
-                        DomainBlacklist.init(getApplication())
+                        DomainBlacklist.reloadFromDatabaseSync(getApplication()) // ← FIX: thay init()
                     }
                 }
 
@@ -80,6 +107,7 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                 _isReady.value = true
 
                 // Sync delta ngầm — KHÔNG block UI
+                // FIX LỖI 1: repo.sync() đã được sửa để xử lý AlreadyUpToDate đúng cách
                 launch(Dispatchers.IO) {
                     Log.i("SplashVM", "Bắt đầu sync ngầm sau khi vào app...")
                     val result = repo.sync()
@@ -89,7 +117,7 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
-            // NHÁNH CHẬM: Lần đầu cài — bắt buộc sync trước
+            // ── NHÁNH CHẬM: Lần đầu cài — bắt buộc sync trước ───────────────────
             _progress.value  = 0.05f
             _statusText.value = "Lần đầu khởi động, đang tải dữ liệu..."
 
@@ -104,9 +132,21 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 when {
-                    // Sync thành công
+                    // Sync thành công hoặc đã up-to-date
+                    // FIX LỖI 3: Cả hai trường hợp này giờ đã được xử lý đúng bởi
+                    // syncWithProgress() đã được sửa ở BlocklistRepository.
+                    // Không cần gọi thêm reloadFromDatabaseSync() hay init() ở đây nữa,
+                    // vì syncWithProgress() đã tự làm khi cần.
                     result is SyncResult.Success ||
                             result is SyncResult.AlreadyUpToDate -> {
+                        // Nếu vì lý do nào đó filter vẫn chưa nạp (fallback an toàn),
+                        // nạp trực tiếp từ DB.
+                        if (!DomainBlacklist.isListsReady()) {
+                            Log.w("SplashVM", "Sau sync, filter vẫn chưa ready — fallback reload DB...")
+                            withContext(Dispatchers.IO) {
+                                DomainBlacklist.reloadFromDatabaseSync(getApplication())
+                            }
+                        }
                         syncSuccess = true
                     }
 
@@ -118,11 +158,13 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                         delay(2000)
                     }
 
-                    // Hết retry — dùng assets bundled sẵn, vẫn cho vào app
+                    // Hết retry — dùng assets bundled sẵn, vẫn cho vào app.
+                    // FIX LỖI 2: Dùng reloadFromDatabaseSync() thay vì init()
+                    // để withContext() thực sự chờ filter nạp xong.
                     else -> {
                         _statusText.value = "Không có mạng. Dùng dữ liệu mặc định..."
                         withContext(Dispatchers.IO) {
-                            DomainBlacklist.init(getApplication())
+                            DomainBlacklist.reloadFromDatabaseSync(getApplication()) // ← FIX: thay init()
                         }
                         syncSuccess = true
                     }
@@ -154,47 +196,42 @@ fun SplashScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Filled.Security,
-            contentDescription = "Logo",
-            modifier = Modifier.size(120.dp),
-            tint = MaterialTheme.colorScheme.primary
+            imageVector        = Icons.Filled.Security,
+            contentDescription = "VShield",
+            modifier           = Modifier.size(80.dp),
+            tint               = MaterialTheme.colorScheme.primary
         )
 
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Vshield",
-            style = MaterialTheme.typography.headlineLarge,
+            text       = "VShield",
+            style      = MaterialTheme.typography.headlineLarge,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
-        Text(
-            text = "Lá chắn bảo vệ thiết bị",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color      = MaterialTheme.colorScheme.primary
         )
 
-        Spacer(modifier = Modifier.height(64.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text  = statusText,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
 
         LinearProgressIndicator(
-            progress = progress,
-            modifier = Modifier
+            progress  = { progress },
+            modifier  = Modifier
                 .fillMaxWidth(0.7f)
-                .height(8.dp),
-            color = MaterialTheme.colorScheme.primary,
-            trackColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface
+                .height(4.dp),
+            color      = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
         )
     }
 }

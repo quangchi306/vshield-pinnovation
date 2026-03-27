@@ -1,5 +1,9 @@
 package com.trustnet.vshield.core
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.util.BitSet
 import kotlin.math.ln
 import kotlin.math.roundToInt
@@ -9,8 +13,6 @@ class BloomFilter private constructor(
     private val numHashFunctions: Int
 ) {
     private val bits = BitSet(bitSize)
-
-    // Đếm số phần tử đã add — dùng để lưu metadata .bin
     private var insertedCount: Int = 0
 
     fun add(value: String) {
@@ -33,18 +35,19 @@ class BloomFilter private constructor(
 
     fun elementCount(): Int = insertedCount
 
-    fun toByteArray(): ByteArray = bits.toByteArray()
-
-    private fun positiveMod(x: Int, m: Int): Int {
-        val r = x % m
-        return if (r < 0) r + m else r
-    }
-
-    private fun hashPair(s: String): Pair<Int, Int> {
-        val b = s.toByteArray(Charsets.UTF_8)
-        val h1 = murmur3_32(b, seed = 0x9747b28c.toInt())
-        val h2 = murmur3_32(b, seed = 0x1b873593)
-        return h1 to (if (h2 == 0) 0x5bd1e995 else h2)
+    /**
+     * Serialize to byte array: [bitSize (int), numHashFunctions (int), bits.toByteArray()]
+     */
+    fun toBytes(): ByteArray {
+        val baos = ByteArrayOutputStream()
+        DataOutputStream(baos).use { dos ->
+            dos.writeInt(bitSize)
+            dos.writeInt(numHashFunctions)
+            val bitsBytes = bits.toByteArray()
+            dos.writeInt(bitsBytes.size)
+            dos.write(bitsBytes)
+        }
+        return baos.toByteArray()
     }
 
     companion object {
@@ -56,26 +59,37 @@ class BloomFilter private constructor(
             return BloomFilter(m, k)
         }
 
-        fun loadFromByteArray(
-            data: ByteArray,
-            expectedInsertions: Int,
-            falsePositiveRate: Double = 0.0000001
-        ): BloomFilter {
-            val n = expectedInsertions.coerceAtLeast(1)
-            val p = falsePositiveRate.coerceIn(1e-9, 0.5)
-            val m = (-(n * ln(p)) / (ln(2.0) * ln(2.0))).roundToInt().coerceAtLeast(64)
-            val k = ((m.toDouble() / n) * ln(2.0)).roundToInt().coerceIn(1, 30)
+        fun fromBytes(bytes: ByteArray): BloomFilter {
+            ByteArrayInputStream(bytes).use { bais ->
+                DataInputStream(bais).use { dis ->
+                    val bitSize = dis.readInt()
+                    val numHashFunctions = dis.readInt()
+                    val bitsLength = dis.readInt()
+                    val bitsBytes = ByteArray(bitsLength)
+                    dis.readFully(bitsBytes)
 
-            val filter = BloomFilter(m, k)
-            filter.bits.clear()
-            val loadedBits = BitSet.valueOf(data)
-            filter.bits.or(loadedBits)
-            // insertedCount giữ nguyên 0 khi load từ .bin
-            // (chỉ dùng elementCount() sau khi add(), không cần thiết sau load)
-            return filter
+                    val filter = BloomFilter(bitSize, numHashFunctions)
+                    filter.bits.clear()
+                    filter.bits.or(BitSet.valueOf(bitsBytes))
+                    // insertedCount giữ nguyên 0 (không cần thiết)
+                    return filter
+                }
+            }
         }
 
         fun empty(): BloomFilter = BloomFilter(64, 1)
+
+        private fun positiveMod(x: Int, m: Int): Int {
+            val r = x % m
+            return if (r < 0) r + m else r
+        }
+
+        private fun hashPair(s: String): Pair<Int, Int> {
+            val b = s.toByteArray(Charsets.UTF_8)
+            val h1 = murmur3_32(b, seed = 0x9747b28c.toInt())
+            val h2 = murmur3_32(b, seed = 0x1b873593)
+            return h1 to (if (h2 == 0) 0x5bd1e995 else h2)
+        }
 
         private fun murmur3_32(data: ByteArray, seed: Int): Int {
             var h1 = seed

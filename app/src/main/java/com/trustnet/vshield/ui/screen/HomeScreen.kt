@@ -42,32 +42,29 @@ fun HomeScreen(
     onSettingsClick: () -> Unit
 ) {
     val context = LocalContext.current
-    val gate = LocalParentGate.current
+    val gate    = LocalParentGate.current
 
     val parentingVm: ParentingViewModel = viewModel()
     val parentingState by parentingVm.uiState.collectAsState()
 
-    var isAdultBlocked by remember { mutableStateOf(DomainBlacklist.blockAdult) }
+    var isAdultBlocked    by remember { mutableStateOf(DomainBlacklist.blockAdult) }
     var isGamblingBlocked by remember { mutableStateOf(DomainBlacklist.blockGambling) }
     var blockedDialogMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
     blockedDialogMessage?.let { message ->
         ParentingBlockedDialog(
-            message = message,
+            message   = message,
             onDismiss = { blockedDialogMessage = null }
         )
     }
 
     LaunchedEffect(parentingState.parentingEnabled, isConnected) {
         if (parentingState.parentingEnabled) {
-            // Ép 2 filter luôn bật khi Parenting Mode bật
             if (!isAdultBlocked || !isGamblingBlocked) {
-                isAdultBlocked = true
+                isAdultBlocked    = true
                 isGamblingBlocked = true
                 enforceParentingFilters(context)
             }
-
-            // Ép Protection luôn bật khi Parenting Mode bật
             if (!isConnected) {
                 onToggleClick()
                 Toast.makeText(
@@ -80,33 +77,24 @@ fun HomeScreen(
     }
 
     val backgroundColor by animateColorAsState(
-        targetValue = if (isConnected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
+        targetValue   = if (isConnected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surface,
         animationSpec = tween(500),
-        label = "bgColor"
+        label         = "bgColor"
     )
 
     val buttonColor by animateColorAsState(
-        targetValue = if (isConnected) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.secondaryContainer
-        },
+        targetValue   = if (isConnected) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.secondaryContainer,
         animationSpec = tween(500),
-        label = "btnColor"
+        label         = "btnColor"
     )
 
     val iconColor by animateColorAsState(
-        targetValue = if (isConnected) {
-            MaterialTheme.colorScheme.onPrimary
-        } else {
-            MaterialTheme.colorScheme.onSecondaryContainer
-        },
+        targetValue   = if (isConnected) MaterialTheme.colorScheme.onPrimary
+        else MaterialTheme.colorScheme.onSecondaryContainer,
         animationSpec = tween(500),
-        label = "iconColor"
+        label         = "iconColor"
     )
 
     Scaffold(
@@ -118,42 +106,35 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+            horizontalAlignment  = Alignment.CenterHorizontally,
+            verticalArrangement  = Arrangement.SpaceBetween
         ) {
 
+            // ── Nút kết nối ──────────────────────────────────────────────────
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.weight(0.5f)
+                modifier         = Modifier.weight(0.5f)
             ) {
                 ConnectButton(
                     isConnected = isConnected,
                     buttonColor = buttonColor,
-                    iconColor = iconColor,
-                    onClick = {
+                    iconColor   = iconColor,
+                    onClick     = {
                         when {
                             parentingState.parentingEnabled && isConnected -> {
                                 blockedDialogMessage =
                                     "Không thể tắt VShield Protection ở màn hình Home khi Parenting Mode đang bật.\n\n" +
                                             "Nếu muốn thay đổi, hãy vào Settings > Parenting Control."
                             }
-
                             parentingState.parentingEnabled && !isConnected -> {
                                 blockedDialogMessage =
                                     "Parenting Mode yêu cầu VShield Protection luôn ở trạng thái bật."
                                 onToggleClick()
                             }
-
                             else -> {
-                                val action = if (isConnected) {
-                                    ParentAction.ToggleProtectionOff
-                                } else {
-                                    ParentAction.ToggleProtectionOn
-                                }
-
-                                gate.protect(action) {
-                                    onToggleClick()
-                                }
+                                val action = if (isConnected) ParentAction.ToggleProtectionOff
+                                else             ParentAction.ToggleProtectionOn
+                                gate.protect(action) { onToggleClick() }
                             }
                         }
                     }
@@ -164,24 +145,25 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // ── Tùy chọn bộ lọc ─────────────────────────────────────────────
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
+                colors   = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                 )
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Tùy chọn chặn",
-                        style = MaterialTheme.typography.titleMedium,
+                        text       = "Tùy chọn chặn",
+                        style      = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
                     FilterSwitchRow(
-                        label = "Web người lớn (Adult)",
-                        checked = isAdultBlocked,
+                        label          = "Web người lớn (Adult)",
+                        checked        = isAdultBlocked,
                         onCheckedChange = { checked ->
                             if (parentingState.parentingEnabled) {
                                 blockedDialogMessage =
@@ -198,12 +180,12 @@ fun HomeScreen(
 
                     Divider(
                         modifier = Modifier.padding(vertical = 8.dp),
-                        color = Color.Gray.copy(alpha = 0.2f)
+                        color    = Color.Gray.copy(alpha = 0.2f)
                     )
 
                     FilterSwitchRow(
-                        label = "Cờ bạc (Gambling)",
-                        checked = isGamblingBlocked,
+                        label          = "Cờ bạc (Gambling)",
+                        checked        = isGamblingBlocked,
                         onCheckedChange = { checked ->
                             if (parentingState.parentingEnabled) {
                                 blockedDialogMessage =
@@ -222,13 +204,18 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.weight(0.1f))
 
+            // ── Thống kê ─────────────────────────────────────────────────────
             StatsDashboard(
-                isConnected = isConnected,
+                isConnected  = isConnected,
                 blockedCount = blockedCount
             )
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper functions
+// ─────────────────────────────────────────────────────────────────────────────
 
 fun handleSettingChange(
     context: Context,
@@ -236,22 +223,28 @@ fun handleSettingChange(
     blockGambling: Boolean
 ) {
     val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
-    prefs.edit()
-        .putBoolean("BLOCK_ADULT", blockAdult)
-        .putBoolean("BLOCK_GAMBLING", blockGambling)
-        .apply()
 
-    DomainBlacklist.blockAdult = blockAdult
+    // FIX LỖI 4: Dùng commit() thay vì apply().
+    // apply() là bất đồng bộ — nếu process bị kill ngay sau khi user đổi cài đặt,
+    // dữ liệu có thể chưa kịp ghi ra đĩa → mất cài đặt sau khi restart.
+    // commit() là đồng bộ, đảm bảo ghi xong hoàn toàn trước khi return.
+    // Vì thao tác này chỉ ghi 2 boolean (rất nhẹ), chi phí đồng bộ hoàn toàn chấp nhận được.
+    prefs.edit()
+        .putBoolean("BLOCK_ADULT",    blockAdult)
+        .putBoolean("BLOCK_GAMBLING", blockGambling)
+        .commit() // ← FIX: thay apply() bằng commit()
+
+    DomainBlacklist.blockAdult    = blockAdult
     DomainBlacklist.blockGambling = blockGambling
 
     val intent = Intent(context, VShieldVpnService::class.java).apply {
-        action = VShieldVpnService.ACTION_STOP
+        action = VShieldVpnService.ACTION_UPDATE_SETTINGS
     }
     context.startService(intent)
 
     Toast.makeText(
         context,
-        "Đã lưu cài đặt. Vui lòng bật lại VPN!",
+        "Đã lưu cài đặt. Bộ lọc được cập nhật ngay lập tức.",
         Toast.LENGTH_SHORT
     ).show()
 }
@@ -259,17 +252,21 @@ fun handleSettingChange(
 fun enforceParentingFilters(context: Context) {
     val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
 
-    val currentAdult = prefs.getBoolean("BLOCK_ADULT", DomainBlacklist.blockAdult)
+    val currentAdult    = prefs.getBoolean("BLOCK_ADULT",    DomainBlacklist.blockAdult)
     val currentGambling = prefs.getBoolean("BLOCK_GAMBLING", DomainBlacklist.blockGambling)
 
     if (currentAdult && currentGambling) return
 
     handleSettingChange(
-        context = context,
-        blockAdult = true,
+        context      = context,
+        blockAdult   = true,
         blockGambling = true
     )
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI Components
+// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 fun FilterSwitchRow(
@@ -278,15 +275,12 @@ fun FilterSwitchRow(
     onCheckedChange: (Boolean) -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier              = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment     = Alignment.CenterVertically
     ) {
         Text(text = label)
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange
-        )
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
@@ -296,34 +290,27 @@ fun HomeTopBar(
     onSettingsClick: () -> Unit
 ) {
     Row(
-        modifier = Modifier
+        modifier              = Modifier
             .fillMaxWidth()
             .padding(16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment     = Alignment.CenterVertically
     ) {
         Column {
             Text(
-                text = "VShield Home",
-                style = MaterialTheme.typography.headlineSmall,
+                text       = "VShield Home",
+                style      = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = if (isConnected) "Đang bảo vệ" else "Đã tắt",
+                text  = if (isConnected) "Đang bảo vệ" else "Đã tắt",
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (isConnected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.error
-                }
+                color = if (isConnected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.error
             )
         }
-
         IconButton(onClick = onSettingsClick) {
-            Icon(
-                imageVector = Icons.Outlined.Settings,
-                contentDescription = "Settings"
-            )
+            Icon(imageVector = Icons.Outlined.Settings, contentDescription = "Settings")
         }
     }
 }
@@ -336,9 +323,9 @@ fun ConnectButton(
     onClick: () -> Unit
 ) {
     val scale by animateFloatAsState(
-        targetValue = if (isConnected) 1.05f else 1.0f,
+        targetValue   = if (isConnected) 1.05f else 1.0f,
         animationSpec = tween(300),
-        label = "scale"
+        label         = "scale"
     )
 
     Box(
@@ -358,14 +345,11 @@ fun ConnectButton(
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            imageVector = if (isConnected) {
-                Icons.Filled.Security
-            } else {
-                Icons.Filled.PowerSettingsNew
-            },
+            imageVector     = if (isConnected) Icons.Filled.Security
+            else Icons.Filled.PowerSettingsNew,
             contentDescription = "Connect",
-            tint = iconColor,
-            modifier = Modifier.size(64.dp)
+            tint            = iconColor,
+            modifier        = Modifier.size(64.dp)
         )
     }
 }
@@ -373,7 +357,7 @@ fun ConnectButton(
 @Composable
 fun StatusText(isConnected: Boolean) {
     Text(
-        text = if (isConnected) "Hệ thống đang chạy ngầm" else "Nhấn nút để bắt đầu",
+        text  = if (isConnected) "Hệ thống đang chạy ngầm" else "Nhấn nút để bắt đầu",
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
     )
@@ -386,25 +370,25 @@ fun StatsDashboard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
+        colors   = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
         )
     ) {
         Row(
-            modifier = Modifier
+            modifier              = Modifier
                 .padding(16.dp)
                 .fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceAround
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = blockedCount,
-                    style = MaterialTheme.typography.headlineMedium,
+                    text       = blockedCount,
+                    style      = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    color      = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Đã chặn",
+                    text  = "Đã chặn",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -422,28 +406,26 @@ fun ParentingBlockedDialog(
         onDismissRequest = onDismiss,
         icon = {
             Icon(
-                imageVector = Icons.Default.Lock,
+                imageVector        = Icons.Default.Lock,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
+                tint               = MaterialTheme.colorScheme.primary
             )
         },
         title = {
             Text(
-                text = title,
-                style = MaterialTheme.typography.headlineSmall,
+                text       = title,
+                style      = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
         },
         text = {
             Text(
-                text = message,
+                text  = message,
                 style = MaterialTheme.typography.bodyLarge
             )
         },
         confirmButton = {
-            Button(onClick = onDismiss) {
-                Text("Đã hiểu")
-            }
+            Button(onClick = onDismiss) { Text("Đã hiểu") }
         }
     )
 }
