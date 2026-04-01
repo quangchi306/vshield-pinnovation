@@ -140,7 +140,7 @@ fun BlockedScreen(
             }
         }
 
-        // ── Danh sách ────────────────────────────────────────────────────────
+        // Danh sách
         AnimatedVisibility(
             visible = entries.isNotEmpty(),
             modifier = Modifier.padding(paddingValues),
@@ -187,9 +187,8 @@ fun BlockedScreen(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Card từng entry
-// ─────────────────────────────────────────────────────────────────────────────
+
+// Card từng entryD
 
 @Composable
 private fun BlockedEntryCard(
@@ -281,16 +280,18 @@ private fun BlockedEntryCard(
                     }
 
                     // Nút Bỏ qua
-                    TextButton(
-                        onClick        = { onBypass() },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier       = Modifier.height(30.dp)
-                    ) {
-                        Text(
-                            text  = "Bỏ qua",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    if (entry.canBypass) {
+                        TextButton(
+                            onClick        = { onBypass() },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier       = Modifier.height(30.dp)
+                        ) {
+                            Text(
+                                text  = "Bỏ qua",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
@@ -320,8 +321,6 @@ private fun BlockedEntryCard(
         }
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 private fun formatCountdown(seconds: Int): String {
     val m = seconds / 60

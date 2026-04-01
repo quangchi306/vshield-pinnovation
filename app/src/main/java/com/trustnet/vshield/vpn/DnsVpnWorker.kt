@@ -1,5 +1,6 @@
 package com.trustnet.vshield.vpn
 
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.trustnet.vshield.VShieldVpnService
 import com.trustnet.vshield.core.BlockedDomainLog
@@ -12,7 +13,6 @@ import com.trustnet.vshield.vpn.dns.DnsMessageBuilder
 import com.trustnet.vshield.vpn.dns.DnsMessageParser
 import com.trustnet.vshield.vpn.packet.PacketBuilder
 import com.trustnet.vshield.vpn.packet.UdpIpv4Packet
-import android.os.ParcelFileDescriptor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+
 
 class DnsVpnWorker(
     private val service: VShieldVpnService,
@@ -140,7 +141,8 @@ class DnsVpnWorker(
                 BlockedDomainLog.add(
                     domain = qDomain,
                     reason = "Lừa đảo & Mã độc",
-                    source = BlockedDomainLog.Source.BLACKLIST
+                    source = BlockedDomainLog.Source.BLACKLIST,
+                    category = DomainBlacklist.BlockCategory.PHISHING
                 )
                 responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                 Log.d("VShield", "BLOCKED [PHISHING]: $qDomain")
@@ -159,7 +161,8 @@ class DnsVpnWorker(
                 BlockedDomainLog.add(
                     domain = qDomain,
                     reason = reason,
-                    source = BlockedDomainLog.Source.BLACKLIST
+                    source = BlockedDomainLog.Source.BLACKLIST,
+                    category = DomainBlacklist.getBlockCategory(qDomain)
                 )
                 responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                 Log.d("VShield", "BLOCKED [CONTENT]: $qDomain")
@@ -189,7 +192,8 @@ class DnsVpnWorker(
                         BlockedDomainLog.add(
                             domain = qDomain,
                             reason = aiDecision.reason,
-                            source = BlockedDomainLog.Source.AI
+                            source = BlockedDomainLog.Source.AI,
+                            category = aiReasonToCategory(aiDecision.reason)
                         )
                         responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                         Log.d("VShield", "BLOCKED BY AI (Cache hit): $qDomain")
@@ -225,13 +229,14 @@ class DnsVpnWorker(
                         BlockedDomainLog.add(
                             domain = qDomain,
                             reason = aiResult.reason,
-                            source = BlockedDomainLog.Source.AI
+                            source = BlockedDomainLog.Source.AI,
+                            category = aiReasonToCategory(aiResult.reason)
                         )
                         responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
-                        Log.d("VShield", "🚫 BLOCKED BY AI (Realtime): $qDomain - ${aiResult.reason}")
+                        Log.d("VShield", "BLOCKED BY AI (Realtime): $qDomain - ${aiResult.reason}")
                     } else {
                         responsePayload = forwardToUpstream(dnsPayload)
-                        Log.d("VShield", "✅ SAFE (Realtime): $qDomain")
+                        Log.d("VShield", "SAFE (Realtime): $qDomain")
                     }
                 }
             }
@@ -325,7 +330,19 @@ class DnsVpnWorker(
             }
         }
     }
-
+    //Helper phân loại AI res
+    private fun aiReasonToCategory(reason: String): DomainBlacklist.BlockCategory {
+        return when {
+            reason.contains("18+", ignoreCase = true) ->
+                DomainBlacklist.BlockCategory.ADULT
+            reason.contains("Cờ bạc", ignoreCase = true) ->
+                DomainBlacklist.BlockCategory.GAMBLING
+            reason.contains("Lừa đảo", ignoreCase = true) ||
+                    reason.contains("Mã độc", ignoreCase = true) ->
+                DomainBlacklist.BlockCategory.PHISHING
+            else -> DomainBlacklist.BlockCategory.PHISHING
+        }
+    }
     companion object {
         // Giảm thời gian chờ từ 10s xuống 2s vì VpnService đã có cơ chế chờ riêng
         private const val MAX_LISTS_WAIT_MS = 2_000L

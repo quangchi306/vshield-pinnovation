@@ -3166,10 +3166,10 @@ class BlocklistRepository(private val context: Context) {
                 onProgress(10, "Äang káº¿t ná»‘i mÃ¡y chá»§ dá»¯ liá»‡u...")
 
                 val result = if (syncPrefs.needsFullSync) {
-                    onProgress(20, "Äang táº£i dá»¯ liá»‡u tÃªn miá»n (Full Sync)...")
+                    onProgress(20, "Äang táº£i dá»¯ liá»‡u...")
                     fullSync()
                 } else {
-                    onProgress(20, "Äang kiá»ƒm tra báº£n cáº­p nháº­t (Delta Sync)...")
+                    onProgress(20, "Äang kiá»ƒm tra báº£n cáº­p nháº­t...")
                     deltaSync()
                 }
 
@@ -3222,7 +3222,7 @@ class BlocklistRepository(private val context: Context) {
         }
     }
 
-    // â”€â”€ Blocklist sync â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Blocklist sync
 
     private suspend fun fullSync(): SyncResult {
         Log.i(TAG, "Blocklist Full Sync báº¯t Ä‘áº§u...")
@@ -3288,7 +3288,7 @@ class BlocklistRepository(private val context: Context) {
         )
     }
 
-    // â”€â”€ Whitelist sync â€” tÃ¡ch riÃªng â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Whitelist sync
 
     private suspend fun syncWhitelist() {
         try {
@@ -4145,7 +4145,7 @@ fun BlockedScreen(
             }
         }
 
-        // â”€â”€ Danh sÃ¡ch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Danh sÃ¡ch
         AnimatedVisibility(
             visible = entries.isNotEmpty(),
             modifier = Modifier.padding(paddingValues),
@@ -4192,9 +4192,8 @@ fun BlockedScreen(
     }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 // Card tá»«ng entry
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @Composable
 private fun BlockedEntryCard(
@@ -4326,8 +4325,6 @@ private fun BlockedEntryCard(
     }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 private fun formatCountdown(seconds: Int): String {
     val m = seconds / 60
     val s = seconds % 60
@@ -4416,12 +4413,7 @@ fun HomeScreen(
         }
     }
 
-    val backgroundColor by animateColorAsState(
-        targetValue   = if (isConnected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surface,
-        animationSpec = tween(500),
-        label         = "bgColor"
-    )
+    val backgroundColor = Color.White
 
     val buttonColor by animateColorAsState(
         targetValue   = if (isConnected) MaterialTheme.colorScheme.primary
@@ -4450,7 +4442,7 @@ fun HomeScreen(
             verticalArrangement  = Arrangement.SpaceBetween
         ) {
 
-            // â”€â”€ NÃºt káº¿t ná»‘i â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            //NÃºt káº¿t ná»‘i
             Box(
                 contentAlignment = Alignment.Center,
                 modifier         = Modifier.weight(0.5f)
@@ -4485,7 +4477,7 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // â”€â”€ TÃ¹y chá»n bá»™ lá»c â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // TÃ¹y chá»n bá»™ lá»c
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors   = CardDefaults.cardColors(
@@ -4544,7 +4536,7 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.weight(0.1f))
 
-            // â”€â”€ Thá»‘ng kÃª â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Thá»‘ng kÃª
             StatsDashboard(
                 isConnected  = isConnected,
                 blockedCount = blockedCount
@@ -4553,9 +4545,8 @@ fun HomeScreen(
     }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 // Helper functions
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 fun handleSettingChange(
     context: Context,
@@ -4563,12 +4554,6 @@ fun handleSettingChange(
     blockGambling: Boolean
 ) {
     val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
-
-    // FIX Lá»–I 4: DÃ¹ng commit() thay vÃ¬ apply().
-    // apply() lÃ  báº¥t Ä‘á»“ng bá»™ â€” náº¿u process bá»‹ kill ngay sau khi user Ä‘á»•i cÃ i Ä‘áº·t,
-    // dá»¯ liá»‡u cÃ³ thá»ƒ chÆ°a ká»‹p ghi ra Ä‘Ä©a â†’ máº¥t cÃ i Ä‘áº·t sau khi restart.
-    // commit() lÃ  Ä‘á»“ng bá»™, Ä‘áº£m báº£o ghi xong hoÃ n toÃ n trÆ°á»›c khi return.
-    // VÃ¬ thao tÃ¡c nÃ y chá»‰ ghi 2 boolean (ráº¥t nháº¹), chi phÃ­ Ä‘á»“ng bá»™ hoÃ n toÃ n cháº¥p nháº­n Ä‘Æ°á»£c.
     prefs.edit()
         .putBoolean("BLOCK_ADULT",    blockAdult)
         .putBoolean("BLOCK_GAMBLING", blockGambling)
@@ -4581,12 +4566,6 @@ fun handleSettingChange(
         action = VShieldVpnService.ACTION_UPDATE_SETTINGS
     }
     context.startService(intent)
-
-    Toast.makeText(
-        context,
-        "ÄÃ£ lÆ°u cÃ i Ä‘áº·t. Bá»™ lá»c Ä‘Æ°á»£c cáº­p nháº­t ngay láº­p tá»©c.",
-        Toast.LENGTH_SHORT
-    ).show()
 }
 
 fun enforceParentingFilters(context: Context) {
@@ -4604,10 +4583,8 @@ fun enforceParentingFilters(context: Context) {
     )
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// UI Components
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+// UI Components
 @Composable
 fun FilterSwitchRow(
     label: String,
@@ -4638,7 +4615,7 @@ fun HomeTopBar(
     ) {
         Column {
             Text(
-                text       = "VShield Home",
+                text       = "VShield",
                 style      = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
@@ -5188,10 +5165,9 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 // Náº¿u .bin bá»‹ lá»—i â†’ fallback load tá»« DB.
-                // FIX Lá»–I 2: DÃ¹ng reloadFromDatabaseSync() thay vÃ¬ init().
+                // FIX Lá»–I 2: DÃ¹ng reloadFromDatabaseSync()
                 // init() lÃ  fire-and-forget (spawn coroutine rá»“i return ngay),
                 // withContext() khÃ´ng thá»±c sá»± chá» filter náº¡p xong.
-                // reloadFromDatabaseSync() lÃ  suspend fun â†’ withContext() chá» Ä‘Ãºng cÃ¡ch.
                 if (!loadOk) {
                     _statusText.value = "Cache lá»—i, Ä‘ang náº¡p tá»« dá»¯ liá»‡u cÅ©..."
                     withContext(Dispatchers.IO) {
@@ -5224,7 +5200,7 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
-            // â”€â”€ NHÃNH CHáº¬M: Láº§n Ä‘áº§u cÃ i â€” báº¯t buá»™c sync trÆ°á»›c â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            //Láº§n Ä‘áº§u cÃ i - báº¯t buá»™c sync trÆ°á»›c
             _progress.value  = 0.05f
             _statusText.value = "Láº§n Ä‘áº§u khá»Ÿi Ä‘á»™ng, Ä‘ang táº£i dá»¯ liá»‡u..."
 

@@ -191,16 +191,18 @@ private fun BlockedEntryItem(
                     }
 
                     // Nút bypass
-                    TextButton(
-                        onClick         = { onBypass(entry.domain) },
-                        contentPadding  = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier        = Modifier.height(28.dp)
-                    ) {
-                        Text(
-                            text  = "Bỏ qua",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    if (entry.canBypass) {
+                        TextButton(
+                            onClick         = { onBypass(entry.domain) },
+                            contentPadding  = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier        = Modifier.height(28.dp)
+                        ) {
+                            Text(
+                                text  = "Bỏ qua",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }

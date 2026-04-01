@@ -81,10 +81,9 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 // Nếu .bin bị lỗi → fallback load từ DB.
-                // FIX LỖI 2: Dùng reloadFromDatabaseSync() thay vì init().
+                // FIX LỖI 2: Dùng reloadFromDatabaseSync()
                 // init() là fire-and-forget (spawn coroutine rồi return ngay),
                 // withContext() không thực sự chờ filter nạp xong.
-                // reloadFromDatabaseSync() là suspend fun → withContext() chờ đúng cách.
                 if (!loadOk) {
                     _statusText.value = "Cache lỗi, đang nạp từ dữ liệu cũ..."
                     withContext(Dispatchers.IO) {
@@ -117,7 +116,7 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                 return@launch
             }
 
-            // ── NHÁNH CHẬM: Lần đầu cài — bắt buộc sync trước ───────────────────
+            //Lần đầu cài - bắt buộc sync trước
             _progress.value  = 0.05f
             _statusText.value = "Lần đầu khởi động, đang tải dữ liệu..."
 

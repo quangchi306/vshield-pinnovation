@@ -76,12 +76,7 @@ fun HomeScreen(
         }
     }
 
-    val backgroundColor by animateColorAsState(
-        targetValue   = if (isConnected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surface,
-        animationSpec = tween(500),
-        label         = "bgColor"
-    )
+    val backgroundColor = Color.White
 
     val buttonColor by animateColorAsState(
         targetValue   = if (isConnected) MaterialTheme.colorScheme.primary
@@ -110,7 +105,7 @@ fun HomeScreen(
             verticalArrangement  = Arrangement.SpaceBetween
         ) {
 
-            // ── Nút kết nối ──────────────────────────────────────────────────
+            //Nút kết nối
             Box(
                 contentAlignment = Alignment.Center,
                 modifier         = Modifier.weight(0.5f)
@@ -145,7 +140,7 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ── Tùy chọn bộ lọc ─────────────────────────────────────────────
+            // Tùy chọn bộ lọc
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors   = CardDefaults.cardColors(
@@ -204,7 +199,7 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.weight(0.1f))
 
-            // ── Thống kê ─────────────────────────────────────────────────────
+            // Thống kê
             StatsDashboard(
                 isConnected  = isConnected,
                 blockedCount = blockedCount
@@ -213,9 +208,8 @@ fun HomeScreen(
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+
 // Helper functions
-// ─────────────────────────────────────────────────────────────────────────────
 
 fun handleSettingChange(
     context: Context,
@@ -252,10 +246,8 @@ fun enforceParentingFilters(context: Context) {
     )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UI Components
-// ─────────────────────────────────────────────────────────────────────────────
 
+// UI Components
 @Composable
 fun FilterSwitchRow(
     label: String,
@@ -286,7 +278,7 @@ fun HomeTopBar(
     ) {
         Column {
             Text(
-                text       = "VShield Home",
+                text       = "VShield",
                 style      = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )

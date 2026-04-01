@@ -106,10 +106,10 @@ class BlocklistRepository(private val context: Context) {
                 onProgress(10, "Đang kết nối máy chủ dữ liệu...")
 
                 val result = if (syncPrefs.needsFullSync) {
-                    onProgress(20, "Đang tải dữ liệu tên miền (Full Sync)...")
+                    onProgress(20, "Đang tải dữ liệu...")
                     fullSync()
                 } else {
-                    onProgress(20, "Đang kiểm tra bản cập nhật (Delta Sync)...")
+                    onProgress(20, "Đang kiểm tra bản cập nhật...")
                     deltaSync()
                 }
 
@@ -162,7 +162,7 @@ class BlocklistRepository(private val context: Context) {
         }
     }
 
-    // ── Blocklist sync ────────────────────────────────────────────────────────
+    // Blocklist sync
 
     private suspend fun fullSync(): SyncResult {
         Log.i(TAG, "Blocklist Full Sync bắt đầu...")
@@ -228,7 +228,7 @@ class BlocklistRepository(private val context: Context) {
         )
     }
 
-    // ── Whitelist sync — tách riêng ───────────────────────────────────────────
+    // Whitelist sync
 
     private suspend fun syncWhitelist() {
         try {
