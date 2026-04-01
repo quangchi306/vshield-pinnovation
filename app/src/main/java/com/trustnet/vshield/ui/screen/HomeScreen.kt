@@ -162,7 +162,7 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     FilterSwitchRow(
-                        label          = "Web người lớn (Adult)",
+                        label          = "Web người lớn",
                         checked        = isAdultBlocked,
                         onCheckedChange = { checked ->
                             if (parentingState.parentingEnabled) {
@@ -184,7 +184,7 @@ fun HomeScreen(
                     )
 
                     FilterSwitchRow(
-                        label          = "Cờ bạc (Gambling)",
+                        label          = "Web cờ bạc",
                         checked        = isGamblingBlocked,
                         onCheckedChange = { checked ->
                             if (parentingState.parentingEnabled) {
@@ -223,12 +223,6 @@ fun handleSettingChange(
     blockGambling: Boolean
 ) {
     val prefs = context.getSharedPreferences("VShieldPrefs", Context.MODE_PRIVATE)
-
-    // FIX LỖI 4: Dùng commit() thay vì apply().
-    // apply() là bất đồng bộ — nếu process bị kill ngay sau khi user đổi cài đặt,
-    // dữ liệu có thể chưa kịp ghi ra đĩa → mất cài đặt sau khi restart.
-    // commit() là đồng bộ, đảm bảo ghi xong hoàn toàn trước khi return.
-    // Vì thao tác này chỉ ghi 2 boolean (rất nhẹ), chi phí đồng bộ hoàn toàn chấp nhận được.
     prefs.edit()
         .putBoolean("BLOCK_ADULT",    blockAdult)
         .putBoolean("BLOCK_GAMBLING", blockGambling)
@@ -241,12 +235,6 @@ fun handleSettingChange(
         action = VShieldVpnService.ACTION_UPDATE_SETTINGS
     }
     context.startService(intent)
-
-    Toast.makeText(
-        context,
-        "Đã lưu cài đặt. Bộ lọc được cập nhật ngay lập tức.",
-        Toast.LENGTH_SHORT
-    ).show()
 }
 
 fun enforceParentingFilters(context: Context) {
@@ -357,9 +345,9 @@ fun ConnectButton(
 @Composable
 fun StatusText(isConnected: Boolean) {
     Text(
-        text  = if (isConnected) "Hệ thống đang chạy ngầm" else "Nhấn nút để bắt đầu",
+        text  = if (isConnected) "" else "Nhấn nút để bắt đầu",
         style = MaterialTheme.typography.bodyLarge,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
     )
 }
 
