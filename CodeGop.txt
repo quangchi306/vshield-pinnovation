@@ -925,54 +925,49 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * In-memory log cá»§a cÃ¡c tÃªn miá»n vá»«a bá»‹ cháº·n.
- *
- * Quy táº¯c:
- *  - Má»—i domain chá»‰ xuáº¥t hiá»‡n 1 láº§n â€” náº¿u bá»‹ cháº·n láº¡i thÃ¬ entry cÅ© bá»‹ xÃ³a,
- *    entry má»›i Ä‘Æ°á»£c thÃªm vÃ o Ä‘áº§u danh sÃ¡ch (newest-first).
- *  - Má»—i entry tá»± Ä‘á»™ng háº¿t háº¡n sau TTL_MS (5 phÃºt).
- *  - Thread-safe: má»i thao tÃ¡c Ä‘á»u Ä‘i qua synchronized(map).
- */
 object BlockedDomainLog {
 
-    const val TTL_MS = 5 * 60 * 1000L   // 5 phÃºt
+    const val TTL_MS = 5 * 60 * 1000L
 
-    // Nguá»“n gá»‘c cháº·n
     enum class Source { BLACKLIST, AI }
 
     data class BlockedEntry(
         val domain: String,
         val reason: String,
         val source: Source,
+        val category: DomainBlacklist.BlockCategory,
         val blockedAt: Long = System.currentTimeMillis()
     ) {
         val expireAt: Long get() = blockedAt + TTL_MS
+        val canBypass: Boolean
+            get() = category == DomainBlacklist.BlockCategory.ADULT ||
+                    category == DomainBlacklist.BlockCategory.GAMBLING
     }
 
-    // LinkedHashMap: key = domain (dedup O(1)), duyá»‡t theo thá»© tá»± chÃ¨n
     private val map = LinkedHashMap<String, BlockedEntry>()
 
     private val _entries = MutableStateFlow<List<BlockedEntry>>(emptyList())
     val entries: StateFlow<List<BlockedEntry>> = _entries.asStateFlow()
 
-    /**
-     * ThÃªm 1 entry má»›i.
-     * Náº¿u domain Ä‘Ã£ cÃ³ trong log â†’ xÃ³a entry cÅ© trÆ°á»›c, chÃ¨n má»›i â†’ tá»± Ä‘á»™ng lÃªn Ä‘áº§u.
-     */
-    fun add(domain: String, reason: String, source: Source) {
+    fun add(
+        domain: String,
+        reason: String,
+        source: Source,
+        category: DomainBlacklist.BlockCategory
+    ) {
         synchronized(map) {
-            map.remove(domain)         // bá» entry cÅ© náº¿u tá»“n táº¡i â†’ re-insert vÃ o cuá»‘i map
-            purgeExpiredLocked()       // dá»n entry háº¿t háº¡n trÆ°á»›c khi thÃªm
-            map[domain] = BlockedEntry(domain, reason, source)
+            map.remove(domain)
+            purgeExpiredLocked()
+            map[domain] = BlockedEntry(
+                domain = domain,
+                reason = reason,
+                source = source,
+                category = category
+            )
             publish()
         }
     }
 
-    /**
-     * NgÆ°á»i dÃ¹ng báº¥m "Bá» qua" â†’ xÃ³a khá»i log ngay láº­p tá»©c.
-     * Caller cÃ²n pháº£i gá»i DomainBlacklist.addTemporaryAllow(domain) Ä‘á»ƒ VPN bá» cháº·n.
-     */
     fun bypass(domain: String) {
         synchronized(map) {
             map.remove(domain)
@@ -980,10 +975,6 @@ object BlockedDomainLog {
         }
     }
 
-    /**
-     * Gá»i Ä‘á»‹nh ká»³ tá»« UI (LaunchedEffect) Ä‘á»ƒ dá»n entry háº¿t TTL.
-     * KhÃ´ng emit StateFlow náº¿u danh sÃ¡ch khÃ´ng thay Ä‘á»•i (trÃ¡nh recompose thá»«a).
-     */
     fun tick() {
         synchronized(map) {
             val before = map.size
@@ -991,8 +982,6 @@ object BlockedDomainLog {
             if (map.size != before) publish()
         }
     }
-
-    // â”€â”€â”€ Private â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private fun purgeExpiredLocked() {
         val now = System.currentTimeMillis()
@@ -1002,7 +991,6 @@ object BlockedDomainLog {
         }
     }
 
-    /** Publish list má»›i nháº¥t â€” reversed() Ä‘á»ƒ entry má»›i nháº¥t lÃªn Ä‘áº§u */
     private fun publish() {
         _entries.value = map.values.reversed().toList()
     }
@@ -3951,16 +3939,18 @@ private fun BlockedEntryItem(
                     }
 
                     // NÃºt bypass
-                    TextButton(
-                        onClick         = { onBypass(entry.domain) },
-                        contentPadding  = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier        = Modifier.height(28.dp)
-                    ) {
-                        Text(
-                            text  = "Bá» qua",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    if (entry.canBypass) {
+                        TextButton(
+                            onClick         = { onBypass(entry.domain) },
+                            contentPadding  = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier        = Modifier.height(28.dp)
+                        ) {
+                            Text(
+                                text  = "Bá» qua",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
@@ -4193,7 +4183,7 @@ fun BlockedScreen(
 }
 
 
-// Card tá»«ng entry
+// Card tá»«ng entryD
 
 @Composable
 private fun BlockedEntryCard(
@@ -4285,16 +4275,18 @@ private fun BlockedEntryCard(
                     }
 
                     // NÃºt Bá» qua
-                    TextButton(
-                        onClick        = { onBypass() },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                        modifier       = Modifier.height(30.dp)
-                    ) {
-                        Text(
-                            text  = "Bá» qua",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    if (entry.canBypass) {
+                        TextButton(
+                            onClick        = { onBypass() },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier       = Modifier.height(30.dp)
+                        ) {
+                            Text(
+                                text  = "Bá» qua",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
@@ -5616,6 +5608,7 @@ FILE: C:\Users\Quang Chi\StudioProjects\vshield-pinnovation\app\src\main\java\co
 
 package com.trustnet.vshield.vpn
 
+import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.trustnet.vshield.VShieldVpnService
 import com.trustnet.vshield.core.BlockedDomainLog
@@ -5628,7 +5621,6 @@ import com.trustnet.vshield.vpn.dns.DnsMessageBuilder
 import com.trustnet.vshield.vpn.dns.DnsMessageParser
 import com.trustnet.vshield.vpn.packet.PacketBuilder
 import com.trustnet.vshield.vpn.packet.UdpIpv4Packet
-import android.os.ParcelFileDescriptor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -5651,6 +5643,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+
 
 class DnsVpnWorker(
     private val service: VShieldVpnService,
@@ -5756,7 +5749,8 @@ class DnsVpnWorker(
                 BlockedDomainLog.add(
                     domain = qDomain,
                     reason = "Lá»«a Ä‘áº£o & MÃ£ Ä‘á»™c",
-                    source = BlockedDomainLog.Source.BLACKLIST
+                    source = BlockedDomainLog.Source.BLACKLIST,
+                    category = DomainBlacklist.BlockCategory.PHISHING
                 )
                 responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                 Log.d("VShield", "BLOCKED [PHISHING]: $qDomain")
@@ -5775,7 +5769,8 @@ class DnsVpnWorker(
                 BlockedDomainLog.add(
                     domain = qDomain,
                     reason = reason,
-                    source = BlockedDomainLog.Source.BLACKLIST
+                    source = BlockedDomainLog.Source.BLACKLIST,
+                    category = DomainBlacklist.getBlockCategory(qDomain)
                 )
                 responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                 Log.d("VShield", "BLOCKED [CONTENT]: $qDomain")
@@ -5805,7 +5800,8 @@ class DnsVpnWorker(
                         BlockedDomainLog.add(
                             domain = qDomain,
                             reason = aiDecision.reason,
-                            source = BlockedDomainLog.Source.AI
+                            source = BlockedDomainLog.Source.AI,
+                            category = aiReasonToCategory(aiDecision.reason)
                         )
                         responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
                         Log.d("VShield", "BLOCKED BY AI (Cache hit): $qDomain")
@@ -5841,13 +5837,14 @@ class DnsVpnWorker(
                         BlockedDomainLog.add(
                             domain = qDomain,
                             reason = aiResult.reason,
-                            source = BlockedDomainLog.Source.AI
+                            source = BlockedDomainLog.Source.AI,
+                            category = aiReasonToCategory(aiResult.reason)
                         )
                         responsePayload = DnsMessageBuilder.buildNxdomainResponse(dnsPayload)
-                        Log.d("VShield", "ðŸš« BLOCKED BY AI (Realtime): $qDomain - ${aiResult.reason}")
+                        Log.d("VShield", "BLOCKED BY AI (Realtime): $qDomain - ${aiResult.reason}")
                     } else {
                         responsePayload = forwardToUpstream(dnsPayload)
-                        Log.d("VShield", "âœ… SAFE (Realtime): $qDomain")
+                        Log.d("VShield", "SAFE (Realtime): $qDomain")
                     }
                 }
             }
@@ -5941,7 +5938,19 @@ class DnsVpnWorker(
             }
         }
     }
-
+    //Helper phÃ¢n loáº¡i AI res
+    private fun aiReasonToCategory(reason: String): DomainBlacklist.BlockCategory {
+        return when {
+            reason.contains("18+", ignoreCase = true) ->
+                DomainBlacklist.BlockCategory.ADULT
+            reason.contains("Cá» báº¡c", ignoreCase = true) ->
+                DomainBlacklist.BlockCategory.GAMBLING
+            reason.contains("Lá»«a Ä‘áº£o", ignoreCase = true) ||
+                    reason.contains("MÃ£ Ä‘á»™c", ignoreCase = true) ->
+                DomainBlacklist.BlockCategory.PHISHING
+            else -> DomainBlacklist.BlockCategory.PHISHING
+        }
+    }
     companion object {
         // Giáº£m thá»i gian chá» tá»« 10s xuá»‘ng 2s vÃ¬ VpnService Ä‘Ã£ cÃ³ cÆ¡ cháº¿ chá» riÃªng
         private const val MAX_LISTS_WAIT_MS = 2_000L

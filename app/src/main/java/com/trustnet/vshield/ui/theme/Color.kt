@@ -3,7 +3,7 @@ package com.trustnet.vshield.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // Màu chủ đạo theo yêu cầu
-val VShieldBlue = Color(0xFF3CABD1)
+val VShieldBlue = Color(0xFF4ECDC4)
 val VShieldGreen = Color(0xFF7DC27F)
 
 // Các biến thể hỗ trợ giao diện (Light/Dark)
